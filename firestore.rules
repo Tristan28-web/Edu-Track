@@ -1,0 +1,74 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if a user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if the user is the owner of a document
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Rules for the 'users' collection
+    match /users/{userId} {
+      // Any authenticated user can read user profiles (needed for display names, roles etc.)
+      allow read: if isAuthenticated();
+
+      // Only the owner of the document can write to it
+      allow write: if isOwner(userId);
+    }
+    
+    // Rules for 'platformSettings'
+    match /platformSettings/{docId} {
+      allow read: if isAuthenticated(); // All authenticated users can read settings
+      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; // Only admins can write
+    }
+
+    // Rules for 'courseContent'
+    match /courseContent/{contentId} {
+        // Allow read if user is authenticated
+        allow read: if isAuthenticated();
+        // Allow create, update, delete if the user is a teacher and the teacherId on the document matches their UID
+        allow write: if isAuthenticated() && request.auth.uid == request.resource.data.teacherId;
+    }
+
+    // Rules for 'teacherActivities'
+    match /teacherActivities/{activityId} {
+        // Teachers can read activities intended for them
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' && resource.data.teacherId == request.auth.uid;
+        // Teachers can create their own activities
+        allow create: if isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' && request.resource.data.teacherId == request.auth.uid;
+        // No updates or deletes allowed for logging purposes
+        allow update, delete: if false;
+    }
+
+    // Rules for 'sections'
+    match /sections/{sectionId} {
+      // Allow read if authenticated
+      allow read: if isAuthenticated();
+      // Allow write if user is a teacher and is the owner of the section
+      allow write: if isAuthenticated() && request.auth.uid == request.resource.data.teacherId;
+    }
+    
+    // Rules for real-time chat conversations
+    match /conversations/{conversationId} {
+      // Allow read/write on the conversation document (for lastMessage updates) if user is a participant
+      allow get, list, create, update: if isAuthenticated() && request.auth.uid in resource.data.participants;
+
+      match /messages/{messageId} {
+        // Allow read if user is a participant
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]);
+        // Allow create if user is a participant and the senderId is their own UID
+        allow create: if isAuthenticated() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]) && request.resource.data.senderId == request.auth.uid;
+        // Allow delete only if the user is the sender of the message
+        allow delete: if isAuthenticated() && isOwner(resource.data.senderId);
+        // Disallow updates to messages
+        allow update: if false;
+      }
+    }
+  }
+}
