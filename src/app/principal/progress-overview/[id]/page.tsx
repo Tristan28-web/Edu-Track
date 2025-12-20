@@ -21,6 +21,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface DisplayStudentProgress extends AppUser {
   overallMastery: number;
@@ -99,14 +100,19 @@ export default function StudentProgressDetailPage() {
         const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
         
         const imgX = (pdfWidth - imgWidth * ratio) / 2;
-        const imgY = 0; // Align to top
+        const imgY = 0;
   
         pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
         
         pdf.save(`student-progress-report-${studentProgress.username}.pdf`);
   
-    } catch (error) {
-        console.error("Error generating PDF:", error);
+    } catch (pdfError) {
+        console.error("Error generating PDF:", pdfError);
+        toast({
+            title: "PDF Error",
+            description: "Could not generate the PDF file. Please try again.",
+            variant: "destructive"
+        });
     } finally {
         document.body.removeChild(captureContainer);
         setIsDownloading(false);
@@ -204,17 +210,11 @@ export default function StudentProgressDetailPage() {
               bestTopic = { title: mathTopics.find(t => t.slug === sortedByMastery[0].topic)?.title || sortedByMastery[0].topic, mastery: sortedByMastery[0].mastery };
               const worst = sortedByMastery[sortedByMastery.length - 1];
               if (worst) worstTopic = { title: mathTopics.find(t => t.slug === worst.topic)?.title || worst.topic, mastery: worst.mastery };
-              topicsProgress = aggregatedMasteries.map(item => {
-                const quizzesAttempted = studentProgressData?.[item.topic]?.quizzesAttempted || 0;
-                const status = quizzesAttempted > 0 || item.mastery > 0
-                  ? (item.mastery >= 75 ? "Completed" : "In Progress")
-                  : "Not Started";
-                return {
-                  topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
-                  mastery: item.mastery,
-                  status,
-                };
-              });
+              topicsProgress = aggregatedMasteries.map(item => ({
+                topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
+                mastery: item.mastery,
+                status: studentProgressData?.[item.topic]?.status || "Not Started",
+              }));
             }
         }
 
@@ -277,7 +277,7 @@ export default function StudentProgressDetailPage() {
           </div>
           <div className="flex justify-center sm:justify-end gap-2 w-full sm:w-auto">
             <Button onClick={handleDownloadPdf} disabled={isDownloading} className="w-full sm:w-[150px]">
-                {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <><Download className="mr-2 h-4 w-4" /><span>Download PDF</span></>}
+              {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <><Download className="mr-2 h-4 w-4" /><span>Download PDF</span></>}
             </Button>
           </div>
         </CardHeader>
@@ -285,127 +285,170 @@ export default function StudentProgressDetailPage() {
       
       <div ref={reportRef} className="space-y-8">
         <Card className="shadow-md hover:shadow-xl transition-shadow duration-300 flex flex-col">
-          <CardHeader className="p-6">
-              <div className="flex justify-between items-start">
-                  <div>
-                      <CardTitle className="font-headline text-2xl text-primary/90">{studentProgress.displayName || "N/A"}</CardTitle>
-                      <CardDescription>Section: {studentProgress.sectionName || "Unassigned"}</CardDescription>
-                  </div>
-                  <div className={cn("flex items-center gap-2 font-semibold text-sm", studentProgress.level.color)}>
-                      {studentProgress.level.icon}
-                      {studentProgress.level.name}
-                  </div>
-              </div>
-          </CardHeader>
-          <CardContent className="space-y-6 p-6 pt-0 flex-grow">
-              <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Overall Mastery</label>
-              <div className="flex items-center gap-2">
-                  <Progress value={studentProgress.overallMastery} className="h-2.5 flex-1" />
-                  <span className="text-lg font-semibold w-12 text-right">{studentProgress.overallMastery}%</span>
-              </div>
-              </div>
+            <CardHeader className="p-6">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle className="font-headline text-2xl text-primary/90">{studentProgress.displayName || "N/A"}</CardTitle>
+                        <CardDescription>Section: {studentProgress.sectionName || "Unassigned"}</CardDescription>
+                    </div>
+                    <div className={cn("flex items-center gap-2 font-semibold text-sm", studentProgress.level.color)}>
+                        {studentProgress.level.icon}
+                        {studentProgress.level.name}
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-6 p-6 pt-0 flex-grow">
+                <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground">Overall Mastery</label>
+                <div className="flex items-center gap-2">
+                    <Progress value={studentProgress.overallMastery} className="h-2.5 flex-1" />
+                    <span className="text-lg font-semibold w-12 text-right">{studentProgress.overallMastery}%</span>
+                </div>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                  <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
-                      <h3 className="text-sm font-semibold text-muted-foreground">Average Score</h3>
-                      <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.averageScore} />%</p>
-                  </Card>
-                  <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
-                      <h3 className="text-sm font-semibold text-muted-foreground">Quizzes Taken</h3>
-                      <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.quizzesTaken} /></p>
-                  </Card>
-                  <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
-                      <h3 className="text-sm font-semibold text-muted-foreground">Topics Completed</h3>
-                      <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.topicsCompleted} /></p>
-                  </Card>
-              </div>
-              
-              <Separator />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+                    <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Average Score</h3>
+                        <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.averageScore} />%</p>
+                    </Card>
+                    <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Quizzes Taken</h3>
+                        <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.quizzesTaken} /></p>
+                    </Card>
+                    <Card className="p-4 rounded-lg bg-secondary/30 flex flex-col items-center justify-center">
+                        <h3 className="text-sm font-semibold text-muted-foreground">Topics Completed</h3>
+                        <p className="text-3xl font-bold mt-1 text-primary"><AnimatedCounter value={studentProgress.topicsCompleted} /></p>
+                    </Card>
+                </div>
+                
+                <Separator />
 
-              <div className="grid md:grid-cols-2 gap-6">
-              <Card>
-                  <CardHeader>
-                  <CardTitle>Topic Progress</CardTitle>
-                  <CardDescription>Progress across all assigned topics</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                  {studentProgress.topicsProgress.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                      <p>No topics assigned yet.</p>
-                      </div>
-                  ) : (
-                      studentProgress.topicsProgress.map((topic, index) => (
-                      <div key={`${topic.topic}-${index}`} className="space-y-2">
-                          <div className="flex justify-between items-center">
-                          <span className="font-medium text-sm capitalize">{topic.topic}</span>
-                          <div className="flex items-center gap-2">
-                              <Badge variant={topic.status === "Completed" ? "default" : "secondary"}>{topic.status}</Badge>
-                              <span className="text-sm font-semibold">{topic.mastery}%</span>
-                          </div>
-                          </div>
-                          <Progress value={topic.mastery} className="h-2" />
-                      </div>
-                      ))
-                  )}
-                  </CardContent>
-              </Card>
+                <div className="grid md:grid-cols-2 gap-6">
+                <Card>
+                    <CardHeader>
+                    <CardTitle>Topic Progress</CardTitle>
+                    <CardDescription>Progress across all assigned topics</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                    {studentProgress.topicsProgress.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                        <p>No topics assigned yet.</p>
+                        </div>
+                    ) : (
+                        studentProgress.topicsProgress.map((topic, index) => (
+                        <div key={`${topic.topic}-${index}`} className="space-y-2">
+                            <div className="flex justify-between items-center">
+                            <span className="font-medium text-sm capitalize">{topic.topic}</span>
+                            <div className="flex items-center gap-2">
+                                <Badge variant={topic.status === "Completed" ? "default" : "secondary"}>{topic.status}</Badge>
+                                <span className="text-sm font-semibold">{topic.mastery}%</span>
+                            </div>
+                            </div>
+                            <Progress value={topic.mastery} className="h-2" />
+                        </div>
+                        ))
+                    )}
+                    </CardContent>
+                </Card>
 
-              <Card>
-                  <CardHeader>
-                  <CardTitle>Recent Quizzes</CardTitle>
-                  <CardDescription>Latest quiz attempts</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                  {studentProgress.recentQuizResults.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground"><p>No quiz attempts yet.</p></div>
-                  ) : (
-                      <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-                      {studentProgress.recentQuizResults.map((quiz, index) => (
-                          <div key={`${quiz.quizId}-${index}`} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div className="flex-1">
-                              <p className="font-medium capitalize">{mathTopics.find(t => t.slug === quiz.topic)?.title || quiz.topic}</p>
-                              <p className="text-xs text-muted-foreground">{format(quiz.submittedAt.toDate(), 'MMM dd, yyyy â€¢ h:mm a')}</p>
-                              {quiz.difficulty && <p className="text-xs text-muted-foreground">Difficulty: {quiz.difficulty}</p>}
-                          </div>
-                          <Badge className={cn("font-semibold", getScoreColor(quiz.percentage, 100))}>{quiz.percentage}%</Badge>
-                          </div>
-                      ))}
-                      </div>
-                  )}
-                  </CardContent>
-              </Card>
-              </div>
+                <Card>
+                    <CardHeader>
+                    <CardTitle>Recent Quizzes</CardTitle>
+                    <CardDescription>Latest quiz attempts</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                    {studentProgress.recentQuizResults.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground"><p>No quiz attempts yet.</p></div>
+                    ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Topic</TableHead>
+                              <TableHead>Date</TableHead>
+                              <TableHead className="text-right">Score</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {studentProgress.recentQuizResults.map((quiz, index) => {
+                              // Format percentage to 1 decimal place
+                              const formattedPercentage = quiz.percentage != null 
+                                ? `${(Math.round(quiz.percentage * 10) / 10).toFixed(1)}%`
+                                : "0.0%";
+                              
+                              // Format date properly without encoding issues
+                              let formattedDate = "Date unavailable";
+                              if (quiz.submittedAt) {
+                                try {
+                                  const date = quiz.submittedAt.toDate();
+                                  formattedDate = format(date, 'MMM dd, yyyy • h:mm a');
+                                } catch (error) {
+                                  console.error("Error formatting date:", error);
+                                }
+                              }
+                              
+                              return (
+                                <TableRow key={`${quiz.quizId}-${index}`}>
+                                  <TableCell>
+                                    <div className="flex flex-col">
+                                      <p className="font-medium capitalize">
+                                        {mathTopics.find(t => t.slug === quiz.topic)?.title || quiz.topic}
+                                      </p>
+                                      {quiz.difficulty && (
+                                        <Badge variant="outline" className="w-fit mt-1 text-xs">
+                                          {quiz.difficulty}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <p className="text-sm">{formattedDate}</p>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Badge className={cn("font-semibold text-base px-3", getScoreColor(quiz.percentage, 100))}>
+                                      {formattedPercentage}
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Score: {quiz.correct ?? 0}/{quiz.total ?? 0}
+                                    </p>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                    )}
+                    </CardContent>
+                </Card>
+                </div>
 
-              {studentProgress.topicsProgress.length > 0 && (
-              <Card>
-                  <CardHeader><CardTitle>Progress Summary</CardTitle></CardHeader>
-                  <CardContent>
-                  <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                      <span>Overall Completion</span>
-                      <span className="font-semibold">{studentProgress.overallMastery}%</span>
-                      </div>
-                      <Progress value={studentProgress.overallMastery} className="h-3" />
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                          <p className="text-muted-foreground">Best Topic</p>
-                          <p className="font-semibold capitalize">{studentProgress.bestTopic?.title || "None"} ({studentProgress.bestTopic?.mastery ?? 0}%)</p>
-                      </div>
-                      <div>
-                          <p className="text-muted-foreground">Needs Practice</p>
-                          <p className="font-semibold capitalize">{studentProgress.worstTopic?.title || "None"} ({studentProgress.worstTopic?.mastery ?? 0}%)</p>
-                      </div>
-                      </div>
-                  </div>
-                  </CardContent>
-              </Card>
-              )}
+                {studentProgress.topicsProgress.length > 0 && (
+                <Card>
+                    <CardHeader><CardTitle>Progress Summary</CardTitle></CardHeader>
+                    <CardContent>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                        <span>Overall Completion</span>
+                        <span className="font-semibold">{studentProgress.overallMastery}%</span>
+                        </div>
+                        <Progress value={studentProgress.overallMastery} className="h-3" />
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <p className="text-muted-foreground">Best Topic</p>
+                            <p className="font-semibold capitalize">{studentProgress.bestTopic?.title || "None"} ({studentProgress.bestTopic?.mastery ?? 0}%)</p>
+                        </div>
+                        <div>
+                            <p className="text-muted-foreground">Needs Practice</p>
+                            <p className="font-semibold capitalize">{studentProgress.worstTopic?.title || "None"} ({studentProgress.worstTopic?.mastery ?? 0}%)</p>
+                        </div>
+                        </div>
+                    </div>
+                    </CardContent>
+                </Card>
+                )}
 
-          </CardContent>
+            </CardContent>
         </Card>
       </div>
     </div>
   );
-}                                                      
-                          
+}
