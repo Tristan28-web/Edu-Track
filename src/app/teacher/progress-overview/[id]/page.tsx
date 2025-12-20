@@ -145,13 +145,18 @@ export default function StudentProgressDetailPage() {
         if (studentProgressData && Object.keys(studentProgressData).length > 0) {
             const masteries: {slug: string, mastery: number}[] = [];
             Object.entries(studentProgressData).forEach(([slug, p]) => {
+                const quizzesAttempted = p.quizzesAttempted || 0;
+                const mastery = p.mastery || 0;
+                const status = quizzesAttempted > 0 
+                  ? (mastery >= 75 ? "Completed" : "In Progress") 
+                  : "Not Started";
                 topicsProgress.push({
                     topic: mathTopics.find(t => t.slug === slug)?.title || slug,
-                    mastery: p.mastery || 0,
-                    status: p.status || "Not Started",
+                    mastery,
+                    status,
                 });
                 if (typeof p.mastery === 'number') masteries.push({slug, mastery: p.mastery});
-                if(p.status === 'Completed') topicsCompletedCalc++;
+                if(status === 'Completed') topicsCompletedCalc++;
                 if (p.lastActivity) {
                   const activityDate = p.lastActivity.toDate();
                   if (!lastActivity || activityDate > lastActivity) lastActivity = activityDate;
@@ -200,11 +205,17 @@ export default function StudentProgressDetailPage() {
               bestTopic = { title: mathTopics.find(t => t.slug === sortedByMastery[0].topic)?.title || sortedByMastery[0].topic, mastery: sortedByMastery[0].mastery };
               const worst = sortedByMastery[sortedByMastery.length - 1];
               if (worst) worstTopic = { title: mathTopics.find(t => t.slug === worst.topic)?.title || worst.topic, mastery: worst.mastery };
-              topicsProgress = aggregatedMasteries.map(item => ({
-                topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
-                mastery: item.mastery,
-                status: studentProgressData?.[item.topic]?.status || "Not Started",
-              }));
+              topicsProgress = aggregatedMasteries.map(item => {
+                const quizzesAttempted = studentProgressData?.[item.topic]?.quizzesAttempted || 0;
+                const status = quizzesAttempted > 0 || item.mastery > 0
+                  ? (item.mastery >= 75 ? "Completed" : "In Progress")
+                  : "Not Started";
+                return {
+                  topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
+                  mastery: item.mastery,
+                  status,
+                };
+              });
             }
         }
 
@@ -355,7 +366,7 @@ export default function StudentProgressDetailPage() {
                           <div key={`${quiz.quizId}-${index}`} className="flex items-center justify-between p-3 border rounded-lg">
                           <div className="flex-1">
                               <p className="font-medium capitalize">{mathTopics.find(t => t.slug === quiz.topic)?.title || quiz.topic}</p>
-                              <p className="text-xs text-muted-foreground">{format(quiz.submittedAt.toDate(), 'MMM dd, yyyy • h:mm a')}</p>
+                              <p className="text-xs text-muted-foreground">{format(quiz.submittedAt.toDate(), 'MMM dd, yyyy â€¢ h:mm a')}</p>
                               {quiz.difficulty && <p className="text-xs text-muted-foreground">Difficulty: {quiz.difficulty}</p>}
                           </div>
                           <Badge className={cn("font-semibold", getScoreColor(quiz.percentage, 100))}>{quiz.percentage}%</Badge>
