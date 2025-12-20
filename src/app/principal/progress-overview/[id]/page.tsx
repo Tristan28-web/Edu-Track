@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -408,6 +407,5 @@ export default function StudentProgressDetailPage() {
       </div>
     </div>
   );
-}
-                                            {studentProgress.topicsProgress.length === 0 ? (
-                      
+}                                                      <div className="flex justify-between items-center">
+                          
