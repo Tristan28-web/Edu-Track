@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Search, Loader2, AlertTriangle, FileText, ChevronRight, Users, BookOpen, BarChart3, Eye, UserCheck, GraduationCap, Download, UserCog } from "lucide-react";
-import type { CourseContentItem, AppUser } from "@/types";
+import type { CourseContentItem, AppUser, QuizResult } from "@/types";
 import { mathTopics } from "@/config/topics";
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
@@ -43,35 +43,65 @@ export default function PrincipalSearchPage() {
       // Fetch real statistics from Firestore
       for (const item of content) {
         if (item.contentType === 'quiz') {
-          // Get quiz attempts and scores
-          const quizResultsQuery = query(
-            collection(db, "quizResults"),
-            where("quizId", "==", item.id)
-          );
-          const quizResultsSnapshot = await getDocs(quizResultsQuery);
-          const attempts = quizResultsSnapshot.docs.length;
+          // Get quiz attempts and scores from students' subcollections
+          let totalAttempts = 0;
+          let totalScore = 0;
           
-          let averageScore = 0;
-          if (attempts > 0) {
-            const totalScore = quizResultsSnapshot.docs.reduce((sum, doc) => {
-              const data = doc.data();
-              return sum + (data.score || 0);
-            }, 0);
-            averageScore = Math.round(totalScore / attempts);
+          // Get all students
+          const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
+          const studentsSnapshot = await getDocs(studentsQuery);
+          
+          for (const studentDoc of studentsSnapshot.docs) {
+            const studentId = studentDoc.id;
+            const quizResultsQuery = query(
+              collection(db, `users/${studentId}/quizResults`),
+              where("quizId", "==", item.id)
+            );
+            const quizResultsSnapshot = await getDocs(quizResultsQuery);
+            
+            totalAttempts += quizResultsSnapshot.docs.length;
+            
+            // Calculate total score
+            quizResultsSnapshot.forEach(doc => {
+              const result = doc.data() as QuizResult;
+              totalScore += result.percentage || 0;
+            });
           }
           
+          const averageScore = totalAttempts > 0 ? Math.round(totalScore / totalAttempts) : 0;
+          
           stats[item.id] = {
-            totalAttempts: attempts,
+            totalAttempts: totalAttempts,
             averageScore: averageScore,
           };
         } else {
-          // Get resource download count
-          const resourceStatsQuery = query(
-            collection(db, "resourceDownloads"),
-            where("resourceId", "==", item.id)
-          );
-          const resourceStatsSnapshot = await getDocs(resourceStatsQuery);
-          const downloadCount = resourceStatsSnapshot.docs.length;
+          // Get resource download count from resourceDownloads collection if it exists
+          let downloadCount = 0;
+          try {
+            const resourceStatsQuery = query(
+              collection(db, "resourceDownloads"),
+              where("resourceId", "==", item.id)
+            );
+            const resourceStatsSnapshot = await getDocs(resourceStatsQuery);
+            downloadCount = resourceStatsSnapshot.docs.length;
+          } catch (err) {
+            // If collection doesn't exist, check student progress for resource access
+            const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
+            const studentsSnapshot = await getDocs(studentsQuery);
+            
+            for (const studentDoc of studentsSnapshot.docs) {
+              const studentData = studentDoc.data() as AppUser;
+              const studentProgress = studentData.progress as Record<string, any> | undefined;
+              
+              // Check if student has any activity that might indicate resource access
+              if (studentProgress && item.topic) {
+                const topicProgress = studentProgress[item.topic];
+                if (topicProgress && topicProgress.lastActivity) {
+                  downloadCount++;
+                }
+              }
+            }
+          }
           
           stats[item.id] = {
             totalDownloads: downloadCount,
