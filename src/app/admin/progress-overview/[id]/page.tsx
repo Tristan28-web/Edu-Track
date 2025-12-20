@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -22,6 +21,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface DisplayStudentProgress extends AppUser {
   overallMastery: number;
@@ -360,18 +360,62 @@ export default function StudentProgressDetailPage() {
                     {studentProgress.recentQuizResults.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground"><p>No quiz attempts yet.</p></div>
                     ) : (
-                        <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-                        {studentProgress.recentQuizResults.map((quiz, index) => (
-                            <div key={`${quiz.quizId}-${index}`} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div className="flex-1">
-                                <p className="font-medium capitalize">{mathTopics.find(t => t.slug === quiz.topic)?.title || quiz.topic}</p>
-                                <p className="text-xs text-muted-foreground">{format(quiz.submittedAt.toDate(), 'MMM dd, yyyy â€¢ h:mm a')}</p>
-                                {quiz.difficulty && <p className="text-xs text-muted-foreground">Difficulty: {quiz.difficulty}</p>}
-                            </div>
-                            <Badge className={cn("font-semibold", getScoreColor(quiz.percentage, 100))}>{quiz.percentage}%</Badge>
-                            </div>
-                        ))}
-                        </div>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Topic</TableHead>
+                              <TableHead>Date</TableHead>
+                              <TableHead className="text-right">Score</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {studentProgress.recentQuizResults.map((quiz, index) => {
+                              // Format percentage to 1 decimal place
+                              const formattedPercentage = quiz.percentage != null 
+                                ? `${(Math.round(quiz.percentage * 10) / 10).toFixed(1)}%`
+                                : "0.0%";
+                              
+                              // Format date properly without encoding issues
+                              let formattedDate = "Date unavailable";
+                              if (quiz.submittedAt) {
+                                try {
+                                  const date = quiz.submittedAt.toDate();
+                                  formattedDate = format(date, 'MMM dd, yyyy • h:mm a');
+                                } catch (error) {
+                                  console.error("Error formatting date:", error);
+                                }
+                              }
+                              
+                              return (
+                                <TableRow key={`${quiz.quizId}-${index}`}>
+                                  <TableCell>
+                                    <div className="flex flex-col">
+                                      <p className="font-medium capitalize">
+                                        {mathTopics.find(t => t.slug === quiz.topic)?.title || quiz.topic}
+                                      </p>
+                                      {quiz.difficulty && (
+                                        <Badge variant="outline" className="w-fit mt-1 text-xs">
+                                          {quiz.difficulty}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <p className="text-sm">{formattedDate}</p>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Badge className={cn("font-semibold text-base px-3", getScoreColor(quiz.percentage, 100))}>
+                                      {formattedPercentage}
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Score: {quiz.correct ?? 0}/{quiz.total ?? 0}
+                                    </p>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
                     )}
                     </CardContent>
                 </Card>
@@ -408,5 +452,3 @@ export default function StudentProgressDetailPage() {
     </div>
   );
 }
-
-    
