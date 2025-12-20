@@ -18,10 +18,13 @@ import Link from 'next/link';
 import { mathTopics } from '@/config/topics';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
+const UNLOCK_MASTERY_THRESHOLD = 75;
+
 interface TopicProgress {
   topic: string;
   mastery: number;
   status: string;
+  quizzesAttempted: number;
 }
 
 export default function SimpleProgressPage() {
@@ -46,11 +49,19 @@ export default function SimpleProgressPage() {
         const userData = docSnap.data() as AppUser;
         const firestoreProgress = userData.progress || {};
 
-        const formattedProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => ({
-          topic: topicKey, 
-          mastery: data.mastery || 0,
-          status: data.status || "Not Started",
-        }));
+        const formattedProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
+          const quizzesAttempted = data.quizzesAttempted || 0;
+          const mastery = data.mastery || 0;
+          const status = quizzesAttempted > 0 
+            ? (mastery >= UNLOCK_MASTERY_THRESHOLD ? "Completed" : "In Progress") 
+            : "Not Started";
+          return {
+            topic: topicKey, 
+            mastery,
+            status,
+            quizzesAttempted,
+          };
+        });
         setTopicsProgress(formattedProgress.sort((a, b) => b.mastery - a.mastery));
       } else {
         setError("User data not found.");
@@ -108,25 +119,35 @@ export default function SimpleProgressPage() {
   
   const topicsProgressWithComputedMastery: TopicProgress[] = topicsProgress.map(tp => {
     const topicResults = quizResults.filter(q => q.topic === tp.topic);
-    if (topicResults.length === 0) return tp;
+    const quizzesAttempted = topicResults.length || tp.quizzesAttempted || 0;
 
-    const topicPointsEarned = topicResults.reduce((sum, quiz) => {
-      const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
-      return sum + raw;
-    }, 0);
-    const topicPointsPossible = topicResults.reduce((sum, quiz) => {
-      const rawTotal = (quiz as any).total ?? 0;
-      return sum + rawTotal;
-    }, 0);
+    // Compute mastery from actual quiz results when available, otherwise fall back to stored mastery
+    let mastery = tp.mastery || 0;
+    if (topicResults.length > 0) {
+      const topicPointsEarned = topicResults.reduce((sum, quiz) => {
+        const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
+        return sum + raw;
+      }, 0);
+      const topicPointsPossible = topicResults.reduce((sum, quiz) => {
+        const rawTotal = (quiz as any).total ?? 0;
+        return sum + rawTotal;
+      }, 0);
 
-    const mastery =
-      topicPointsPossible > 0
-        ? Math.round((topicPointsEarned / topicPointsPossible) * 100)
-        : 0;
+      mastery = topicPointsPossible > 0 ? Math.round((topicPointsEarned / topicPointsPossible) * 100) : 0;
+    }
+
+    const status =
+      quizzesAttempted > 0
+        ? mastery >= UNLOCK_MASTERY_THRESHOLD
+          ? "Completed"
+          : "In Progress"
+        : "Not Started";
 
     return {
       ...tp,
       mastery,
+      quizzesAttempted,
+      status,
     };
   });
 
