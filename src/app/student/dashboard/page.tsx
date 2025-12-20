@@ -2,15 +2,26 @@
 
 import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { useAuth } from '@/contexts/AuthContext';
-import { BookOpen, Target, Zap, List, Award, BookOpenCheck, ListChecks, Loader2, AlertTriangle, Info, CheckCircle, Lightbulb, ExternalLink, GraduationCap, MessageSquare } from 'lucide-react';
+import { BookOpen, Target, Zap, List, Award, BookOpenCheck, ListChecks, Loader2, AlertTriangle, Info, CheckCircle, Lightbulb, ExternalLink, GraduationCap, MessageSquare, PlayCircle } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
-import type { CourseContentItem, AppUser, LessonMaterialDetails, QuizResult } from '@/types';
-import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
+import type { CourseContentItem, AppUser, LessonMaterialDetails, QuizResult, QuizDetails, QuizQuestion } from '@/types';
+import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, Timestamp, increment, addDoc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import Link from 'next/link';
 import { mathTopics } from '@/config/topics';
 import { formatDistanceToNowStrict } from 'date-fns';
@@ -22,6 +33,11 @@ export default function StudentDashboardPage() {
   // Raw data from Firestore listeners
   const [currentUserData, setCurrentUserData] = useState<AppUser | null>(null);
   const [todoItems, setTodoItems] = useState<CourseContentItem[]>([]);
+
+  // Quiz modal state
+  const [selectedQuiz, setSelectedQuiz] = useState<CourseContentItem | null>(null);
+  const [answers, setAnswers] = useState<{ [key: string]: string | string[] }>({});
+  const [score, setScore] = useState<number | null>(null);
 
   // Loading and error states
   const [isLoading, setIsLoading] = useState(true);
@@ -102,12 +118,130 @@ export default function StudentDashboardPage() {
 
   }, [user]);
 
+  const handleSelectQuiz = async (quiz: CourseContentItem) => {
+    try {
+      // Prevent opening a quiz whose due date has already passed
+      if (quiz.dueDate && quiz.dueDate.toDate().getTime() <= Date.now()) {
+        setError("This quiz is no longer available (past its due date).");
+        return;
+      }
+
+      // Ensure we have the full quiz content. Some newly created quizzes
+      // may not include the `content` payload in list snapshots depending
+      // on security/replication timing. Fetch the full document if needed.
+      let fullQuiz = quiz;
+      const maybeQuestions = (quiz.content as any)?.questions;
+      if (!maybeQuestions || !Array.isArray(maybeQuestions) || maybeQuestions.length === 0) {
+        const quizDocRef = doc(db, 'courseContent', quiz.id);
+        const quizSnap = await getDoc(quizDocRef);
+        if (quizSnap.exists()) {
+          fullQuiz = { id: quizSnap.id, ...quizSnap.data() } as CourseContentItem;
+        }
+      }
+
+      // Final safety check
+      const questions = (fullQuiz.content as QuizDetails)?.questions ?? [];
+      if (!questions || questions.length === 0) {
+        setError('Quiz content is not yet available. Please try again in a moment.');
+        return;
+      }
+
+      setSelectedQuiz(fullQuiz);
+      setAnswers({});
+      setScore(null);
+    } catch (err) {
+      console.error('Error loading quiz:', err);
+      setError('Failed to load quiz. Please try again.');
+    }
+  };
+
+  const handleAnswerChange = (questionId: string, value: string) => {
+    setAnswers(prev => ({ ...prev, [questionId]: value }));
+  };
+
+  const handleMultiAnswerChange = (questionId: string, value: string) => {
+    setAnswers(prev => ({ ...prev, [questionId]: value.split('\n') }));
+  };
+
+  const handleSubmitQuiz = async () => {
+    if (!selectedQuiz || !user) return;
+
+    // Prevent submitting a quiz that has expired while open
+    if (selectedQuiz.dueDate && selectedQuiz.dueDate.toDate().getTime() <= Date.now()) {
+      setError("Cannot submit: the due date has passed and this quiz is closed.");
+      return;
+    }
+
+    let correctAnswers = 0;
+    const quizContent = selectedQuiz.content as QuizDetails;
+    quizContent.questions.forEach(question => {
+      const studentAnswer = answers[question.id];
+      if (question.questionType === 'multipleChoice') {
+        const correctOptionIndex = question.correctAnswerIndex ?? -1;
+        const correctOption = question.options?.[correctOptionIndex];
+        if (studentAnswer && correctOption && (studentAnswer as string).trim().toLowerCase() === correctOption.trim().toLowerCase()) {
+          correctAnswers++;
+        }
+      } else if (question.questionType === 'identification' || question.questionType === 'problem-solving') {
+        const correctAnswer = question.answerKey?.[0] || '';
+        if (studentAnswer && (studentAnswer as string).trim().toLowerCase() === correctAnswer.trim().toLowerCase()) {
+          correctAnswers++;
+        }
+      } else if (question.questionType === 'enumeration') {
+        const correctAnswersSet = new Set((question.answerKey || []).map(a => a.trim().toLowerCase()));
+        const studentAnswersSet = new Set((Array.isArray(studentAnswer) ? studentAnswer : []).map(a => a.trim().toLowerCase()));
+        if (correctAnswersSet.size > 0 && Array.from(correctAnswersSet).every(a => studentAnswersSet.has(a))) {
+          correctAnswers++;
+        }
+      }
+    });
+
+    const quizScore = (correctAnswers / quizContent.questions.length) * 100;
+    setScore(quizScore);
+
+    try {
+        const studentRef = doc(db, 'users', user.id);
+        const quizTopic = selectedQuiz.topic;
+
+        const quizResultRef = collection(db, 'users', user.id, 'quizResults');
+        await addDoc(quizResultRef, {
+            quizId: selectedQuiz.id,
+            quizTitle: selectedQuiz.title,
+            topic: quizTopic || 'N/A',
+            submittedAt: Timestamp.now(),
+            percentage: quizScore,
+            correct: correctAnswers,
+            total: quizContent.questions.length,
+        });
+
+        if (quizTopic) {
+          const updateData = {
+            [`progress.${quizTopic}.lastActivity`]: Timestamp.now(),
+            [`progress.${quizTopic}.lastQuizScore`]: quizScore,
+            [`progress.${quizTopic}.lastQuizCorrect`]: correctAnswers,
+            [`progress.${quizTopic}.lastQuizTotal`]: quizContent.questions.length,
+            [`progress.${quizTopic}.mastery`]: quizScore,
+            [`progress.${quizTopic}.quizzesAttempted`]: increment(1),
+          };
+          await updateDoc(studentRef, updateData);
+        }
+
+        // Update todoItems to remove the completed quiz
+        setTodoItems(prev => prev.filter(item => item.id !== selectedQuiz.id));
+    } catch(err) {
+        console.error("Error submitting quiz result:", err);
+        setError("There was an error submitting your quiz. Please try again.");
+    }
+  };
 
   const getTopicTitle = (slug: string | undefined) => {
     if (!slug) return "Unknown Topic";
     const topic = mathTopics.find(t => t.slug === slug);
     return topic?.title || slug;
   };
+  
+  const totalQuestions = (selectedQuiz?.content as QuizDetails)?.questions.length ?? 0;
+  const timeLimit = (selectedQuiz?.content as QuizDetails)?.timeLimitMinutes;
   
   return (
     <div className="space-y-8">
@@ -170,11 +304,10 @@ export default function StudentDashboardPage() {
                         <TableCell className="hidden md:table-cell">{getTopicTitle(item.topic)}</TableCell>
                         <TableCell className="hidden sm:table-cell text-xs">{item.createdAt ? formatDistanceToNowStrict(item.createdAt.toDate(), { addSuffix: true }) : 'N/A'}</TableCell>
                         <TableCell className="text-right">
-                           <Button asChild size="sm">
-                              <Link href={`/student/quizzes/${item.topic}`}>
-                                  Take Quiz
-                              </Link>
-                           </Button>
+                          <Button onClick={() => handleSelectQuiz(item)} size="sm">
+                            <PlayCircle className="mr-2 h-4 w-4" />
+                            Take Quiz
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -203,6 +336,87 @@ export default function StudentDashboardPage() {
           linkText="View My Progress"
         />
       </div>
+
+      <Dialog open={!!selectedQuiz} onOpenChange={() => setSelectedQuiz(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          {selectedQuiz && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedQuiz.title}</DialogTitle>
+                <DialogDescription>
+                  {selectedQuiz.description}
+                  {timeLimit && timeLimit > 0 && (
+                    <span className="block text-sm text-muted-foreground mt-2">
+                      Time Limit: {timeLimit} minutes
+                    </span>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <ScrollArea className="max-h-[60vh] pr-6">
+                {score === null ? (
+                  <div className="space-y-6 py-4">
+                    {(selectedQuiz.content as QuizDetails).questions.map((question, index) => (
+                      <div key={question.id} className='my-4 p-4 border rounded-lg bg-muted/20'>
+                        <p className='font-semibold mb-3'>
+                          {index + 1}. {question.text}
+                        </p>
+                        {question.questionType === 'multipleChoice' && question.options && (
+                          <RadioGroup
+                            value={answers[question.id] as string || ''}
+                            onValueChange={(value) => handleAnswerChange(question.id, value)}
+                          >
+                            {question.options.map((option, optionIndex) => (
+                              <div key={optionIndex} className="flex items-center space-x-2">
+                                <RadioGroupItem value={option} id={`${question.id}-${optionIndex}`} />
+                                <Label htmlFor={`${question.id}-${optionIndex}`}>{option}</Label>
+                              </div>
+                            ))}
+                          </RadioGroup>
+                        )}
+                        {(question.questionType === 'identification' || question.questionType === 'problem-solving') && (
+                          <input
+                            type="text"
+                            placeholder="Your answer"
+                            value={answers[question.id] as string || ''}
+                            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                            className="w-full p-2 border rounded"
+                          />
+                        )}
+                        {question.questionType === 'enumeration' && (
+                          <textarea
+                            placeholder="List your answers, one per line"
+                            value={Array.isArray(answers[question.id]) ? (answers[question.id] as string[]).join('\n') : ''}
+                            onChange={(e) => handleMultiAnswerChange(question.id, e.target.value)}
+                            className="w-full p-2 border rounded"
+                            rows={4}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <h3 className="text-2xl font-bold mb-4">Quiz Completed!</h3>
+                    <p className="text-lg mb-4">Your Score: {score.toFixed(1)}%</p>
+                    <p className="text-muted-foreground">
+                      You answered {Math.round((score / 100) * totalQuestions)} out of {totalQuestions} questions correctly.
+                    </p>
+                  </div>
+                )}
+              </ScrollArea>
+              
+              {score === null && (
+                <DialogFooter>
+                  <Button onClick={handleSubmitQuiz} disabled={Object.keys(answers).length < totalQuestions}>
+                    Submit Quiz
+                  </Button>
+                </DialogFooter>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
-}
+}                            
