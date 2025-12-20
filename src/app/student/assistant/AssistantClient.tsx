@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { answerMathQuestion, type AnswerMathQuestionOutput } from '@/ai/flows/answer-math-question';
+import { answerMathQuestionWithGroq } from '@/lib/groq-api';
 import { Loader2, Sparkles, Bot, X } from 'lucide-react'; 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -20,7 +20,7 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 export function AssistantClient() {
-  const [aiResponse, setAiResponse] = useState<AnswerMathQuestionOutput | null>(null);
+  const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,11 +36,13 @@ export function AssistantClient() {
     setError(null);
     setAiResponse(null);
     try {
-      const response = await answerMathQuestion({ question: data.question });
+      // Call Groq API directly from the client
+      const response = await answerMathQuestionWithGroq(data.question);
       setAiResponse(response);
       form.reset(); // Clear the form input after successful submission
     } catch (err) {
-      console.error("Error calling AI assistant:", err);
+      console.error("Error calling Groq API:", err);
+      // Display the friendly fallback error message
       setError("Sorry, I couldn't process your question right now. Please try again.");
     } finally {
       setIsLoading(false);
@@ -131,7 +133,7 @@ export function AssistantClient() {
             <div className="bg-secondary/20 p-4 rounded-md">
                 <div 
                     className="whitespace-pre-wrap text-foreground/90 leading-relaxed" 
-                    dangerouslySetInnerHTML={{ __html: aiResponse.answer.replace(/\n/g, '<br />') }} 
+                    dangerouslySetInnerHTML={{ __html: aiResponse.replace(/\n/g, '<br />') }} 
                 />
             </div>
           </CardContent>
