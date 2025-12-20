@@ -145,21 +145,50 @@ export default function StudentProgressDetailPage() {
         let bestTopic: { title: string; mastery: number } | null = null;
         let worstTopic: { title: string; mastery: number } | null = null;
         let lastActivity: Date | null = null;
+        
+        // Get all quiz results first to determine which topics have been attempted
+        const quizResultsCollectionSnapshot = await getDocs(collection(db, "users", student.id, "quizResults"));
+        const quizResultsQuery = query(collection(db, "users", student.id, "quizResults"), orderBy("submittedAt", "desc"), limit(5));
+        const quizResultsSnapshot = await getDocs(quizResultsQuery);
+        const recentQuizResults = quizResultsSnapshot.docs.map(doc => doc.data() as QuizResult);
+        
+        // Create a map of topics that have quiz results
+        const topicsWithResults = new Set<string>();
+        quizResultsCollectionSnapshot.forEach(doc => {
+          const result = doc.data() as QuizResult;
+          if (result.topic) {
+            topicsWithResults.add(result.topic);
+            totalPointsEarned += (result as any).score ?? (result as any).correct ?? 0;
+            totalPointsPossible += (result as any).total ?? 0;
+          }
+        });
+        
+        const quizzesTakenCount = quizResultsCollectionSnapshot.size;
+        const weightedAverageScore = totalPointsPossible > 0 ? Math.round((totalPointsEarned / totalPointsPossible) * 100) : 0;
+        
         let topicsProgress: { topic: string; mastery: number; status: string; }[] = [];
 
         if (studentProgressData && Object.keys(studentProgressData).length > 0) {
             const masteries: {slug: string, mastery: number}[] = [];
             Object.entries(studentProgressData).forEach(([slug, p]) => {
                 const quizzesAttempted = p.quizzesAttempted || 0;
+                const hasQuizResults = topicsWithResults.has(slug);
                 const mastery = p.mastery || 0;
-                const status = quizzesAttempted > 0 
-                  ? (mastery >= 75 ? "Completed" : "In Progress") 
-                  : "Not Started";
+                
+                // Determine status based on quiz results, not just quizzesAttempted
+                let status = "Not Started";
+                if (hasQuizResults) {
+                  status = mastery >= 75 ? "Completed" : "In Progress";
+                } else if (quizzesAttempted > 0) {
+                  status = mastery >= 75 ? "Completed" : "In Progress";
+                }
+                
                 topicsProgress.push({
                     topic: mathTopics.find(t => t.slug === slug)?.title || slug,
                     mastery,
                     status,
                 });
+                
                 if (typeof p.mastery === 'number') masteries.push({slug, mastery: p.mastery});
                 if(status === 'Completed') topicsCompletedCalc++;
                 if (p.lastActivity) {
@@ -176,19 +205,7 @@ export default function StudentProgressDetailPage() {
             }
         }
         
-        const quizResultsQuery = query(collection(db, "users", student.id, "quizResults"), orderBy("submittedAt", "desc"), limit(5));
-        const quizResultsSnapshot = await getDocs(quizResultsQuery);
-        const recentQuizResults = quizResultsSnapshot.docs.map(doc => doc.data() as QuizResult);
-        const quizResultsCollectionSnapshot = await getDocs(collection(db, "users", student.id, "quizResults"));
-        const quizzesTakenCount = quizResultsCollectionSnapshot.size;
-        quizResultsCollectionSnapshot.forEach(doc => {
-          const result = doc.data() as QuizResult;
-          totalPointsEarned += (result as any).score ?? (result as any).correct ?? 0;
-          totalPointsPossible += (result as any).total ?? 0;
-        });
-
-        const weightedAverageScore = totalPointsPossible > 0 ? Math.round((totalPointsEarned / totalPointsPossible) * 100) : 0;
-
+        // Calculate mastery from actual quiz results when available
         if (quizResultsCollectionSnapshot.size > 0) {
             const topicAggregates: Record<string, { earned: number; possible: number }> = {};
             quizResultsCollectionSnapshot.forEach(doc => {
@@ -210,11 +227,20 @@ export default function StudentProgressDetailPage() {
               bestTopic = { title: mathTopics.find(t => t.slug === sortedByMastery[0].topic)?.title || sortedByMastery[0].topic, mastery: sortedByMastery[0].mastery };
               const worst = sortedByMastery[sortedByMastery.length - 1];
               if (worst) worstTopic = { title: mathTopics.find(t => t.slug === worst.topic)?.title || worst.topic, mastery: worst.mastery };
-              topicsProgress = aggregatedMasteries.map(item => ({
-                topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
-                mastery: item.mastery,
-                status: studentProgressData?.[item.topic]?.status || "Not Started",
-              }));
+              
+              // Update topicsProgress with accurate mastery and status from quiz results
+              topicsProgress = aggregatedMasteries.map(item => {
+                const mastery = item.mastery;
+                const status = mastery >= 75 ? "Completed" : "In Progress";
+                return {
+                  topic: mathTopics.find(t => t.slug === item.topic)?.title || item.topic,
+                  mastery,
+                  status,
+                };
+              });
+              
+              // Recalculate topicsCompleted based on actual mastery from quiz results
+              topicsCompletedCalc = topicsProgress.filter(topic => topic.status === "Completed").length;
             }
         }
 
@@ -340,7 +366,9 @@ export default function StudentProgressDetailPage() {
                             <div className="flex justify-between items-center">
                             <span className="font-medium text-sm capitalize">{topic.topic}</span>
                             <div className="flex items-center gap-2">
-                                <Badge variant={topic.status === "Completed" ? "default" : "secondary"}>{topic.status}</Badge>
+                                <Badge variant={topic.status === "Completed" ? "default" : (topic.status === "In Progress" ? "secondary" : "outline")}>
+                                  {topic.status}
+                                </Badge>
                                 <span className="text-sm font-semibold">{topic.mastery}%</span>
                             </div>
                             </div>
