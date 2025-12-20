@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Search, Loader2, AlertTriangle, FileText, ChevronRight, Users } from "lucide-react";
+import { Search, Loader2, AlertTriangle, FileText, ChevronRight, Users, BarChart3 } from "lucide-react";
 import type { CourseContentItem, AppUser } from "@/types";
 import { mathTopics } from "@/config/topics";
 import Link from 'next/link';
@@ -28,6 +28,23 @@ export default function TeacherSearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+
+  // Function to get the correct route for different content types
+  const getContentRoute = (item: CourseContentItem) => {
+    if (item.contentType === 'quiz') {
+      return `/teacher/quizzes/${item.id}`;
+    } else if (item.contentType === 'lessonMaterial') {
+      // Redirect to the main materials page
+      return `/teacher/materials`;
+    }
+    return '#';
+  };
+
+  // Function to get the correct route for student profile
+  const getStudentRoute = (studentId: string) => {
+    // Go to student progress detail page
+    return `/teacher/progress-overview/${studentId}`;
+  };
 
   const performSearch = async (queryText: string) => {
     if (!queryText.trim()) {
@@ -199,9 +216,11 @@ export default function TeacherSearchPage() {
                     </div>
                 </div>
                 <Button asChild variant="outline" size="sm">
-                  {/* FIXED: Updated route to match StudentProgressDetailPage */}
-                  <Link href={`/teacher/progress/${student.id}`}>
-                    View Profile <ChevronRight className="ml-2 h-4 w-4"/>
+                  {/* CHANGED: Now goes to progress overview page with "View Progress" button */}
+                  <Link href={getStudentRoute(student.id)}>
+                    <BarChart3 className="mr-2 h-4 w-4" />
+                    View Progress
+                    <ChevronRight className="ml-2 h-4 w-4"/>
                   </Link>
                 </Button>
               </div>
@@ -235,13 +254,10 @@ export default function TeacherSearchPage() {
                   )}
                 </div>
                 <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
-                  {/* FIXED: Updated routing paths to remove '/view' */}
-                  <Link href={
-                    item.contentType === 'quiz' 
-                      ? `/teacher/quizzes/${item.id}` 
-                      : `/teacher/materials/${item.id}`
-                  }>
-                    View <ChevronRight className="ml-2 h-4 w-4"/>
+                  {/* Quizzes go to detail page, resources go to main materials page */}
+                  <Link href={getContentRoute(item)}>
+                    {item.contentType === 'quiz' ? 'View Quiz' : 'View Materials'} 
+                    <ChevronRight className="ml-2 h-4 w-4"/>
                   </Link>
                 </Button>
               </div>
