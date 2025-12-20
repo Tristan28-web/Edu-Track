@@ -199,7 +199,8 @@ export default function TeacherSearchPage() {
                     </div>
                 </div>
                 <Button asChild variant="outline" size="sm">
-                  <Link href={`/teacher/students/view/${student.id}`}>
+                  {/* FIXED: Updated route to match StudentProgressDetailPage */}
+                  <Link href={`/teacher/progress/${student.id}`}>
                     View Profile <ChevronRight className="ml-2 h-4 w-4"/>
                   </Link>
                 </Button>
@@ -234,7 +235,12 @@ export default function TeacherSearchPage() {
                   )}
                 </div>
                 <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
-                  <Link href={item.contentType === 'quiz' ? `/teacher/quizzes/view/${item.id}` : `/teacher/materials/view/${item.id}`}>
+                  {/* FIXED: Updated routing paths to remove '/view' */}
+                  <Link href={
+                    item.contentType === 'quiz' 
+                      ? `/teacher/quizzes/${item.id}` 
+                      : `/teacher/materials/${item.id}`
+                  }>
                     View <ChevronRight className="ml-2 h-4 w-4"/>
                   </Link>
                 </Button>
