@@ -1,0 +1,4 @@
+# Next.js build folder
+.next
+node_modules
+.env.local

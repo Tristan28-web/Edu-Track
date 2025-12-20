@@ -2,7 +2,7 @@
 
 import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { useAuth } from '@/contexts/AuthContext';
-import { BookOpen, Target, Brain, Zap, List, Award, BookOpenCheck, ListChecks, Loader2, AlertTriangle, Info, CheckCircle, Lightbulb, ExternalLink, GraduationCap, MessageSquare } from 'lucide-react';
+import { BookOpen, Target, Zap, List, Award, BookOpenCheck, ListChecks, Loader2, AlertTriangle, Info, CheckCircle, Lightbulb, ExternalLink, GraduationCap, MessageSquare } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import type { CourseContentItem, AppUser, LessonMaterialDetails, QuizResult } from '@/types';
 import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
@@ -186,7 +186,7 @@ export default function StudentDashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2">
         <DashboardCard
           title="Quizzes"
           description="View all available quizzes and complete them to test your knowledge."
@@ -201,14 +201,6 @@ export default function StudentDashboardPage() {
           icon={<Target className="h-8 w-8" />}
           linkHref="/student/my-progress"
           linkText="View My Progress"
-        />
-        
-        <DashboardCard
-          title="AI Math Assistant"
-          description="Stuck? Get hints, step-by-step solutions, or generate practice problems."
-          icon={<Brain className="h-8 w-8" />}
-          linkHref="/student/assistant"
-          linkText="Ask AI Assistant"
         />
       </div>
     </div>
