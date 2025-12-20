@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Search, Loader2, AlertTriangle, FileText, ChevronRight } from "lucide-react";
+import { Search, Loader2, AlertTriangle, FileText, ChevronRight, BookOpen, BarChart3 } from "lucide-react";
 import type { CourseContentItem } from "@/types";
 import { mathTopics } from "@/config/topics";
 import Link from 'next/link';
@@ -95,6 +95,23 @@ export default function StudentSearchPage() {
     return `Course Content ${itemsFound}`;
   };
 
+  // Function to determine the correct route and button text
+  const getContentAction = (item: CourseContentItem) => {
+    if (item.contentType === 'quiz') {
+      return {
+        href: `/student/my-progress`,
+        label: 'View Progress',
+        icon: <BarChart3 className="mr-2 h-4 w-4" />
+      };
+    } else {
+      return {
+        href: `/student/materials`,
+        label: 'View Materials',
+        icon: <BookOpen className="mr-2 h-4 w-4" />
+      };
+    }
+  };
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       <Card className="shadow-sm">
@@ -103,7 +120,7 @@ export default function StudentSearchPage() {
             <Search className="h-8 w-8" /> Global Search
           </CardTitle>
           <CardDescription>
-            {searchQuery ? `Search results for \"${searchQuery}\"` : "Search for quizzes and learning resources"}
+            {searchQuery ? `Search results for "${searchQuery}"` : "Search for quizzes and learning resources"}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -125,7 +142,7 @@ export default function StudentSearchPage() {
       {!searchQuery && !hasSearched && (
         <Card>
           <CardContent className="pt-6 text-center text-muted-foreground">
-            Enter a search term in the header search bar to find students and content.
+            Enter a search term in the header search bar to find quizzes and learning materials.
           </CardContent>
         </Card>
       )}
@@ -133,7 +150,7 @@ export default function StudentSearchPage() {
       {noResults && searchQuery && (
         <Card>
           <CardContent className="pt-6 text-center text-muted-foreground">
-            No quizzes or resources found for \"${searchQuery}\".
+            No quizzes or resources found for "{searchQuery}".
           </CardContent>
         </Card>
       )}
@@ -147,29 +164,35 @@ export default function StudentSearchPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
-            {results.courseContent.map(item => (
-              <div key={item.id} className="p-4 border rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="flex-1">
-                  <h4 className="font-semibold text-lg mb-2">{item.title}</h4>
-                  <div className="text-sm text-muted-foreground flex flex-wrap gap-2">
-                    <Badge variant={item.contentType === 'quiz' ? "default" : "secondary"} className="capitalize">
-                      {item.contentType === 'lessonMaterial' ? 'Resource' : 'Quiz'}
-                    </Badge>
-                    {item.topic && (
-                        <span>Topic: {mathTopics.find(t => t.slug === item.topic)?.title || item.topic}</span>
+            {results.courseContent.map(item => {
+              const action = getContentAction(item);
+              
+              return (
+                <div key={item.id} className="p-4 border rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-lg mb-2">{item.title}</h4>
+                    <div className="text-sm text-muted-foreground flex flex-wrap gap-2">
+                      <Badge variant={item.contentType === 'quiz' ? "default" : "secondary"} className="capitalize">
+                        {item.contentType === 'lessonMaterial' ? 'Resource' : 'Quiz'}
+                      </Badge>
+                      {item.topic && (
+                          <span>Topic: {mathTopics.find(t => t.slug === item.topic)?.title || item.topic}</span>
+                      )}
+                    </div>
+                    {item.description && (
+                      <p className="text-sm mt-2 text-muted-foreground">{item.description}</p>
                     )}
                   </div>
-                  {item.description && (
-                    <p className="text-sm mt-2 text-muted-foreground">{item.description}</p>
-                  )}
-                </div>
-                <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
-                    <Link href={item.contentType === 'quiz' ? `/student/quizzes/view/${item.id}` : `/student/resources/view/${item.id}`}>
-                        View <ChevronRight className="ml-2 h-4 w-4"/>
+                  <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+                    <Link href={action.href}>
+                      {action.icon}
+                      {action.label}
+                      <ChevronRight className="ml-2 h-4 w-4"/>
                     </Link>
-                </Button>
-              </div>
-            ))}
+                  </Button>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
