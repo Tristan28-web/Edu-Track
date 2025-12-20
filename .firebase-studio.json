@@ -1,0 +1,15 @@
+{
+  "prototyper": {
+    "chat": {
+      "enabled": true
+    },
+    "preview": {
+      "enabled": true,
+      "server": {
+        "command": "npm run dev",
+        "port": 3000,
+        "logs": true
+      }
+    }
+  }
+}

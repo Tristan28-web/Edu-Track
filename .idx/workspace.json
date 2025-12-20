@@ -1,0 +1,12 @@
+{
+  "name": "edutrack",
+  "preview": {
+    "server": {
+      "command": "npm run dev",
+      "port": 3000
+    }
+  },
+  "chat": {
+    "enabled": true
+  }
+}

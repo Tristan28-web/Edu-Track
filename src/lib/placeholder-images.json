@@ -1,0 +1,11 @@
+
+{
+  "hero": {
+    "src": "https://picsum.photos/seed/rocket/600/400",
+    "alt": "A collage of a person coding and a person taking notes in a modern office."
+  },
+  "landingStudent": {
+    "src": "https://picsum.photos/seed/student-math/800/600",
+    "alt": "A student engaged in learning mathematics on a digital tablet."
+  }
+}

@@ -1,0 +1,140 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if a user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to get user data from their UID
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+
+    // Helper function to check user's role
+    function hasRole(role) {
+      return isAuthenticated() && getUserData(request.auth.uid).role == role;
+    }
+    
+    // Helper function to check if the user is an admin
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    // Rules for the 'users' collection
+    match /users/{userId} {
+      // Users can update their own data. Admins can update any user data.
+      allow update: if isAdmin() || request.auth.uid == userId;
+      
+      // Read access:
+      // 1. Users can read their own data.
+      // 2. Admins can read any user data.
+      // 3. Principals can read any user data.
+      // 4. Teachers can read the data of their students.
+      allow read: if request.auth.uid == userId ||
+                   isAdmin() ||
+                   hasRole('principal') ||
+                   (hasRole('teacher') && getUserData(userId).role == 'student' && getUserData(userId).teacherId == request.auth.uid);
+
+      // Only admins can create or delete users.
+      allow create, delete: if isAdmin();
+    }
+    
+    // Rules for the 'platformSettings' collection
+    match /platformSettings/{settingId} {
+        // Only admins can read or write platform settings
+        allow read, write: if isAdmin();
+    }
+    
+    // Rules for teacher-created content (quizzes, materials)
+    match /courseContent/{contentId} {
+        // Admins can do anything.
+        allow read, write: if isAdmin();
+        // Teachers can create content. They can update/delete their own content.
+        allow create: if hasRole('teacher');
+        allow update, delete: if hasRole('teacher') && resource.data.teacherId == request.auth.uid;
+        // Students can read content if they are assigned to the teacher who created it.
+        allow read: if hasRole('student') && getUserData(request.auth.uid).teacherId == resource.data.teacherId;
+    }
+
+    // Rules for class sections
+    match /sections/{sectionId} {
+        // Admins can do anything.
+        allow read, write: if isAdmin();
+        // Teachers can create sections. They can update/delete their own sections.
+        allow create: if hasRole('teacher');
+        allow update, delete: if hasRole('teacher') && resource.data.teacherId == request.auth.uid;
+        // Principals and the assigned teacher can read section info.
+        allow read: if hasRole('principal') || (hasRole('teacher') && resource.data.teacherId == request.auth.uid);
+    }
+    
+    // Rules for teacher activities log
+    match /teacherActivities/{activityId} {
+        // Admins and Principals can read all activities.
+        allow read: if isAdmin() || hasRole('principal');
+        // Teachers can create activities for themselves and read their own.
+        allow create: if hasRole('teacher') && request.resource.data.teacherId == request.auth.uid;
+        allow read: if hasRole('teacher') && resource.data.teacherId == request.auth.uid;
+    }
+
+    // Rules for student quiz results (subcollection)
+    match /users/{studentId}/quizResults/{resultId} {
+        // Admins and the student's assigned teacher can read results.
+        allow read: if isAdmin() || (hasRole('teacher') && getUserData(studentId).teacherId == request.auth.uid);
+        // The student can read their own results.
+        allow read: if request.auth.uid == studentId;
+        // Students can create their own results only if the quiz's dueDate hasn't passed.
+        // Fetch the parent courseContent document and ensure its `dueDate` is either not set or in the future.
+        allow create: if request.auth.uid == studentId
+                      && (
+                        // If the courseContent document has no dueDate, allow submission
+                        get(/databases/$(database)/documents/courseContent/$(request.resource.data.quizId)).data.dueDate == null
+                        // Or if dueDate is set, ensure it's after the current request time
+                        || get(/databases/$(database)/documents/courseContent/$(request.resource.data.quizId)).data.dueDate > request.time
+                      );
+    }
+
+    // Rules for conversations and messages
+    match /conversations/{conversationId} {
+        // Participants of the conversation can read/write.
+        allow read, write: if request.auth.uid in resource.data.participants;
+      
+        match /messages/{messageId} {
+            // Participants can read/write messages in their conversation.
+            // Senders can delete their own messages.
+            allow read, create: if request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+            allow delete: if request.auth.uid == resource.data.senderId;
+        }
+    }
+    
+    // --- Attendance System Rules ---
+
+    // Rules for attendance sessions
+    match /sessions/{sessionId} {
+      // Only teachers can create new sessions.
+      allow create: if hasRole('teacher') && request.resource.data.teacherId == request.auth.uid;
+      // Any authenticated user (i.e., a student about to log attendance) can read a session to validate it.
+      allow read: if isAuthenticated();
+      // Sessions cannot be updated or deleted by clients to maintain integrity.
+      allow update, delete: if false;
+    }
+
+    // Rules for attendance records
+    match /attendance/{attendanceId} {
+      // Students can create their own attendance record if the session is valid.
+      allow create: if hasRole('student')
+                      && request.resource.data.studentId == request.auth.uid
+                      && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.expiresAt > request.time;
+                      
+      // Teachers can read attendance for their own section sessions. Admins/Principals can read all.
+      allow read: if isAdmin() || hasRole('principal') || 
+                  (hasRole('teacher') && get(/databases/$(database)/documents/sessions/$(resource.data.sessionId)).data.teacherId == request.auth.uid);
+
+      // Records are immutable from the client.
+      allow update, delete: if false;
+    }
+  }
+}

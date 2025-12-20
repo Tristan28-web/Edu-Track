@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Teachers can upload lesson materials to a path under their user ID.
+    // The contentId is the ID of the document in the 'courseContent' collection.
+    match /materials/{teacherId}/{contentId}/{fileName} {
+      // Allow any authenticated user to read the materials.
+      // For stricter rules, one could check if the user is a student of the teacher.
+      allow read: if request.auth != null;
+
+      // Only the teacher who owns the content can upload/delete files.
+      allow write: if request.auth != null && request.auth.uid == teacherId;
+    }
+  }
+}
