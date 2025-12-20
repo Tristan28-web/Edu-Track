@@ -167,6 +167,24 @@ export default function SimpleProgressPage() {
     return topic?.title || slug;
   };
 
+  // Helper function to format quiz percentage to 1 decimal place
+  const formatQuizPercentage = (percentage: number | undefined): string => {
+    if (percentage === undefined || percentage === null) return "0.0%";
+    return `${Math.round(percentage * 10) / 10}%`;
+  };
+
+  // Helper function to format date with proper encoding
+  const formatQuizDate = (submittedAt: any): string => {
+    if (!submittedAt) return "Date unavailable";
+    try {
+      const date = (submittedAt as Timestamp).toDate();
+      return format(date, 'MMM dd, yyyy • h:mm a');
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "Date unavailable";
+    }
+  };
+
   if (pageIsLoading) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-200px)]">
@@ -268,6 +286,7 @@ export default function SimpleProgressPage() {
           </CardContent>
         </Card>
 
+        {/* Fixed Recent Quizzes Section */}
         <Card>
           <CardHeader>
             <CardTitle>Recent Quizzes</CardTitle>
@@ -282,27 +301,59 @@ export default function SimpleProgressPage() {
                 </Button>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Topic</TableHead>
-                    <TableHead className="text-right">Score</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {quizResults.map((quiz, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <p className="font-medium capitalize">{quiz.topic}</p>
-                        <p className="text-xs text-muted-foreground">{format((quiz.submittedAt as Timestamp).toDate(), 'MMM dd, yyyy')}</p>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Badge className={cn("font-semibold", getScoreColor(quiz.percentage, 100))}>{quiz.percentage}%</Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="space-y-3">
+                {quizResults.slice(0, 5).map((quiz, index) => {
+                  const quizPercentage = quiz.percentage || 0;
+                  const formattedPercentage = formatQuizPercentage(quizPercentage);
+                  const formattedDate = formatQuizDate(quiz.submittedAt);
+                  
+                  return (
+                    <div 
+                      key={index} 
+                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                    >
+                      <div className="space-y-1">
+                        <p className="font-medium capitalize">
+                          {getTopicTitle(quiz.topic)}
+                        </p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>{formattedDate}</span>
+                          {quiz.difficulty && (
+                            <>
+                              <span>•</span>
+                              <Badge variant="outline" className="text-xs">
+                                {quiz.difficulty}
+                              </Badge>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <Badge 
+                          className={cn(
+                            "font-semibold text-base px-3 py-1",
+                            getScoreColor(quizPercentage, 100)
+                          )}
+                        >
+                          {formattedPercentage}
+                        </Badge>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Score: {(quiz as any).score ?? (quiz as any).correct ?? 0}/{(quiz as any).total ?? 0}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {quizResults.length > 5 && (
+                  <div className="text-center pt-2">
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/student/quiz-history">
+                        View all {quizResults.length} quizzes
+                      </Link>
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
