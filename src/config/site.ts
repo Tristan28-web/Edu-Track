@@ -61,11 +61,6 @@ export const siteConfig: SiteConfig = {
         href: '/student/resources',
         icon: Library,
       },
-      {
-        title: 'AI Assistant',
-        href: '/student/assistant',
-        icon: Brain,
-      },
     ],
     userDropdownNav: commonUserDropdownNav,
   },
