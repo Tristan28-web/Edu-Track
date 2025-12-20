@@ -105,8 +105,8 @@ export default function StudentSearchPage() {
       };
     } else {
       return {
-        href: `/student/materials`,
-        label: 'View Materials',
+        href: `/student/resources`,
+        label: 'View Resources',
         icon: <BookOpen className="mr-2 h-4 w-4" />
       };
     }
@@ -142,7 +142,7 @@ export default function StudentSearchPage() {
       {!searchQuery && !hasSearched && (
         <Card>
           <CardContent className="pt-6 text-center text-muted-foreground">
-            Enter a search term in the header search bar to find quizzes and learning materials.
+            Enter a search term in the header search bar to find quizzes and learning resources.
           </CardContent>
         </Card>
       )}
