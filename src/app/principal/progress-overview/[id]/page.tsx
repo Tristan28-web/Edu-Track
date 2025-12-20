@@ -407,5 +407,5 @@ export default function StudentProgressDetailPage() {
       </div>
     </div>
   );
-}                                                      <div className="flex justify-between items-center">
+}                                                      
                           
