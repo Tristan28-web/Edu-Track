@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -11,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Upload, AlertTriangle, File, Eye, FileText, FileBarChart2, Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Loader2, Upload, AlertTriangle, File, Eye, FileText, FileBarChart2, Archive, ArchiveRestore, Trash2, Tag } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
@@ -19,7 +18,7 @@ import type { CourseContentItem, LessonMaterialDetails } from "@/types";
 import { format } from "date-fns";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { mathTopics } from "@/config/topics";
+import { Badge } from "@/components/ui/badge";
 
 const CLOUDINARY_CLOUD_NAME = "dxnwulhow";
 const CLOUDINARY_UPLOAD_PRESET = "edutrack_uploads";
@@ -45,7 +44,8 @@ export function UploadMaterialsClient() {
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   
-  const [selectedTopic, setSelectedTopic] = useState<string>("");
+  const [topicInput, setTopicInput] = useState<string>("");
+  const [recentTopics, setRecentTopics] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -76,6 +76,14 @@ export function UploadMaterialsClient() {
       const files = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CourseContentItem));
       setUploadedFiles(files);
       setIsLoadingFiles(false);
+      
+      // Extract recent unique topics from uploaded files
+      const topics = Array.from(new Set(
+        files
+          .map(file => file.topic)
+          .filter((topic): topic is string => !!topic)
+      )).slice(0, 5); // Show only 5 most recent topics
+      setRecentTopics(topics);
     }, (err) => {
       console.error("Error fetching resources:", err);
       setError("Could not fetch the list of uploaded resources. You may need to create a Firestore index.");
@@ -117,10 +125,12 @@ export function UploadMaterialsClient() {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !user || !selectedSection || !selectedTopic) {
-      setError("Please select a file, topic, and section, and ensure you are logged in.");
+    if (!selectedFile || !user || !selectedSection || !topicInput.trim()) {
+      setError("Please select a file, enter a topic, and select a section.");
       return;
     }
+    
+    const trimmedTopic = topicInput.trim();
     
     if (uploadedFiles.some(file => file.title === selectedFile.name && !file.isArchived)) {
         toast({
@@ -163,7 +173,7 @@ export function UploadMaterialsClient() {
         title: selectedFile.name,
         description: `Uploaded file: ${selectedFile.name}`,
         sectionId: selectedSection,
-        topic: selectedTopic,
+        topic: trimmedTopic,
         gradingPeriod: "1st Quarter",
         contentType: "lessonMaterial",
         content: contentPayload,
@@ -174,8 +184,11 @@ export function UploadMaterialsClient() {
 
       toast({
         title: "Upload Successful",
-        description: `"${selectedFile.name}" has been uploaded.`,
+        description: `"${selectedFile.name}" has been uploaded to "${trimmedTopic}".`,
       });
+
+      // Clear the topic input after successful upload
+      setTopicInput("");
 
     } catch (err: any) {
       console.error("Error uploading:", err);
@@ -230,12 +243,17 @@ export function UploadMaterialsClient() {
     return <File className="h-5 w-5 text-muted-foreground" />;
   };
 
+  // Quick select recent topic
+  const selectRecentTopic = (topic: string) => {
+    setTopicInput(topic);
+  };
+
   return (
     <div className="space-y-8">
       <Card>
         <CardHeader>
           <CardTitle>Upload a New Resource</CardTitle>
-          <CardDescription>Select a file, assign it to a topic and section.</CardDescription>
+          <CardDescription>Select a file and assign it to any topic and section.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -245,15 +263,33 @@ export function UploadMaterialsClient() {
               <p className="text-xs text-muted-foreground mt-2">Allowed types: PDF (max 15MB), DOCX (max 10MB), PPTX (max 25MB).</p>
             </div>
              <div>
-              <Label htmlFor="topic-select">Assign to Topic</Label>
-              <Select value={selectedTopic} onValueChange={setSelectedTopic} disabled={isUploading}>
-                  <SelectTrigger id="topic-select"><SelectValue placeholder="Select a topic" /></SelectTrigger>
-                  <SelectContent>
-                      {mathTopics.map(topic => (
-                          <SelectItem key={topic.slug} value={topic.slug}>{topic.title}</SelectItem>
-                      ))}
-                  </SelectContent>
-              </Select>
+              <Label htmlFor="topic-input">Assign to Topic</Label>
+              <div className="space-y-2">
+                <Input 
+                  id="topic-input" 
+                  placeholder="e.g., Grade 7 Algebra, Linear Equations, Geometry Basics" 
+                  value={topicInput}
+                  onChange={(e) => setTopicInput(e.target.value)}
+                  disabled={isUploading}
+                />
+                
+                {recentTopics.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <p className="text-xs text-muted-foreground w-full">Recent topics:</p>
+                    {recentTopics.map((topic, index) => (
+                      <Badge 
+                        key={index}
+                        variant="outline" 
+                        className="cursor-pointer hover:bg-primary/10 transition-colors"
+                        onClick={() => selectRecentTopic(topic)}
+                      >
+                        <Tag className="h-3 w-3 mr-1" />
+                        {topic}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
              <div>
               <Label htmlFor="section-select">Assign to Section</Label>
@@ -280,7 +316,7 @@ export function UploadMaterialsClient() {
         
         </CardContent>
          <CardFooter>
-           <Button onClick={handleUpload} disabled={!selectedFile || isUploading || !selectedSection || !selectedTopic}>
+           <Button onClick={handleUpload} disabled={!selectedFile || isUploading || !selectedSection || !topicInput.trim()}>
             <Upload className="mr-2 h-4 w-4" />
             {isUploading ? "Uploading..." : "Upload File"}
           </Button>
@@ -324,7 +360,12 @@ export function UploadMaterialsClient() {
                                     {getFileIcon(content.fileType)}
                                     {content.fileName}
                                     </TableCell>
-                                    <TableCell className="hidden md:table-cell">{mathTopics.find(t => t.slug === file.topic)?.title || file.topic}</TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                      <Badge variant="outline" className="font-normal">
+                                        <Tag className="h-3 w-3 mr-1" />
+                                        {file.topic}
+                                      </Badge>
+                                    </TableCell>
                                     <TableCell className="hidden md:table-cell">{file.sectionId ? sections.find(s => s.id === file.sectionId)?.name : 'N/A'}</TableCell>
                                     <TableCell className="hidden sm:table-cell text-xs">{file.createdAt ? format(file.createdAt.toDate(), "PP") : 'N/A'}</TableCell>
                                     <TableCell className="text-right space-x-2">
