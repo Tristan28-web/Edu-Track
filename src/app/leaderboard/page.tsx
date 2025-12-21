@@ -19,11 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Loader2,
-  Trophy,
-  BookOpen,
-} from "lucide-react";
+import { Loader2, Trophy, BookOpen } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { AppUser } from "@/types";
@@ -39,8 +35,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 interface TopicProgressData {
-  mastery: number;
-  quizzesAttempted: number;
+  totalItems?: number;
+  correctItems?: number;
+  quizzesAttempted?: number;
 }
 
 interface RankedStudent extends AppUser {
@@ -90,22 +87,30 @@ export default function ProgressLeaderboardPage() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // 🔥 MATCHES MY PROGRESS PAGE 1:1
+  // 🔥 Weighted topic-based mastery calculation (matches Progress page)
   const calculateStudentProgress = (student: AppUser): number => {
     const progress = student.progress || {};
 
-    const attemptedTopics = Object.values(progress)
-      .map((data) => data as TopicProgressData)
-      .filter((topic) => topic.quizzesAttempted > 0);
+    const topicMasteries: number[] = [];
 
-    if (attemptedTopics.length === 0) return 0;
+    Object.values(progress).forEach((data) => {
+      const topic = data as TopicProgressData;
 
-    const totalMastery = attemptedTopics.reduce(
-      (sum, topic) => sum + (Number(topic.mastery) || 0),
-      0
-    );
+      if (!topic.quizzesAttempted || topic.quizzesAttempted === 0) return;
 
-    return Math.round(totalMastery / attemptedTopics.length);
+      const totalItems = topic.totalItems || 0;
+      const correctItems = topic.correctItems || 0;
+
+      if (totalItems === 0) return;
+
+      const mastery = (correctItems / totalItems) * 100;
+      topicMasteries.push(mastery);
+    });
+
+    if (topicMasteries.length === 0) return 0;
+
+    const total = topicMasteries.reduce((sum, m) => sum + m, 0);
+    return Math.round(total / topicMasteries.length);
   };
 
   const getMasteryLevel = (score: number): RankedStudent["masteryLevel"] => {
