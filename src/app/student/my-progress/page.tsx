@@ -1,35 +1,56 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from 'react';
-import { collection, query, onSnapshot, doc, Timestamp } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { collection, onSnapshot, doc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Trophy, Star, CheckCircle, History, BarChart3, Printer } from "lucide-react";
+import { Loader2, Trophy, Star, CheckCircle, History, BarChart3 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import type { QuizResult, AppUser } from '@/types';
-import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
-import { toast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { mathTopics } from '@/config/topics';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import type { QuizResult, AppUser } from '@/types';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 const UNLOCK_MASTERY_THRESHOLD = 75;
 
-interface TopicProgress {
-  topic: string;
-  mastery: number;
-  status: string;
-  quizzesAttempted: number;
-}
+// ======= NEW: Unified weighted progress calculation =======
+const calculateStudentProgress = (student: AppUser): number => {
+  const progress = student.progress || {};
+
+  const topicMasteries: number[] = [];
+
+  Object.values(progress).forEach((data) => {
+    const topic = data as {
+      totalItems?: number;
+      correctItems?: number;
+      quizzesAttempted?: number;
+    };
+
+    if (!topic.quizzesAttempted || topic.quizzesAttempted === 0) return;
+
+    const totalItems = topic.totalItems || 0;
+    const correctItems = topic.correctItems || 0;
+    if (totalItems === 0) return;
+
+    const mastery = (correctItems / totalItems) * 100;
+    topicMasteries.push(mastery);
+  });
+
+  if (topicMasteries.length === 0) return 0;
+
+  const total = topicMasteries.reduce((sum, m) => sum + m, 0);
+  return Math.round(total / topicMasteries.length);
+};
 
 export default function SimpleProgressPage() {
   const { user, loading: authIsLoading } = useAuth();
-  const [topicsProgress, setTopicsProgress] = useState<TopicProgress[]>([]);
+  const [topicsProgress, setTopicsProgress] = useState<any[]>([]);
   const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,22 +68,16 @@ export default function SimpleProgressPage() {
       if (!isMounted) return;
       if (docSnap.exists()) {
         const userData = docSnap.data() as AppUser;
-        const firestoreProgress = userData.progress || {};
-
-        const formattedProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
-          const quizzesAttempted = data.quizzesAttempted || 0;
-          const mastery = data.mastery || 0;
-          const status = quizzesAttempted > 0 
-            ? (mastery >= UNLOCK_MASTERY_THRESHOLD ? "Completed" : "In Progress") 
-            : "Not Started";
+        setTopicsProgress(userData.progress ? Object.entries(userData.progress).map(([topicKey, data]) => {
+          const topicData = data as any;
           return {
-            topic: topicKey, 
-            mastery,
-            status,
-            quizzesAttempted,
+            topic: topicKey,
+            mastery: topicData.mastery || 0,
+            quizzesAttempted: topicData.quizzesAttempted || 0,
+            totalItems: topicData.totalItems || 0,
+            correctItems: topicData.correctItems || 0,
           };
-        });
-        setTopicsProgress(formattedProgress.sort((a, b) => b.mastery - a.mastery));
+        }) : []);
       } else {
         setError("User data not found.");
       }
@@ -73,12 +88,10 @@ export default function SimpleProgressPage() {
     });
 
     const quizResultsRef = collection(db, `users/${user.id}/quizResults`);
-    const unsubscribeQuizzes = onSnapshot(query(quizResultsRef), (snapshot) => {
+    const unsubscribeQuizzes = onSnapshot(quizResultsRef, (snapshot) => {
       if (!isMounted) return;
-
       const results = snapshot.docs.map(doc => doc.data() as QuizResult);
       setQuizResults(results.sort((a, b) => (b.submittedAt as Timestamp).toMillis() - (a.submittedAt as Timestamp).toMillis()));
-
       if (pageIsLoading) setPageIsLoading(false);
     }, (err) => {
       if (!isMounted) return;
@@ -93,97 +106,6 @@ export default function SimpleProgressPage() {
       unsubscribeQuizzes();
     };
   }, [user, authIsLoading, pageIsLoading]);
-  
-
-  const getScoreColor = (score: number, total: number) => {
-    const percentage = (score / total) * 100;
-    if (percentage >= 80) return "bg-green-100 text-green-800";
-    if (percentage >= 60) return "bg-yellow-100 text-yellow-800";
-    return "bg-red-100 text-red-800";
-  };
-
-  const completedQuizzes = quizResults.length;
-
-  const totalPointsEarned = quizResults.reduce((sum, quiz) => {
-    const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
-    return sum + raw;
-  }, 0);
-  const totalPointsPossible = quizResults.reduce((sum, quiz) => {
-    const rawTotal = (quiz as any).total ?? 0;
-    return sum + rawTotal;
-  }, 0);
-  const averageScore =
-    completedQuizzes > 0 && totalPointsPossible > 0
-      ? Math.round((totalPointsEarned / totalPointsPossible) * 100)
-      : null;
-  
-  const topicsProgressWithComputedMastery: TopicProgress[] = topicsProgress.map(tp => {
-    const topicResults = quizResults.filter(q => q.topic === tp.topic);
-    const quizzesAttempted = topicResults.length || tp.quizzesAttempted || 0;
-
-    // Compute mastery from actual quiz results when available, otherwise fall back to stored mastery
-    let mastery = tp.mastery || 0;
-    if (topicResults.length > 0) {
-      const topicPointsEarned = topicResults.reduce((sum, quiz) => {
-        const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
-        return sum + raw;
-      }, 0);
-      const topicPointsPossible = topicResults.reduce((sum, quiz) => {
-        const rawTotal = (quiz as any).total ?? 0;
-        return sum + rawTotal;
-      }, 0);
-
-      mastery = topicPointsPossible > 0 ? Math.round((topicPointsEarned / topicPointsPossible) * 100) : 0;
-    }
-
-    const status =
-      quizzesAttempted > 0
-        ? mastery >= UNLOCK_MASTERY_THRESHOLD
-          ? "Completed"
-          : "In Progress"
-        : "Not Started";
-
-    return {
-      ...tp,
-      mastery,
-      quizzesAttempted,
-      status,
-    };
-  });
-
-  const masteredTopics = topicsProgressWithComputedMastery.filter(topic => topic.mastery >= 80).length;
-  const totalTopics = topicsProgressWithComputedMastery.length;
-  const overallCompletion =
-    totalTopics > 0
-      ? Math.round(
-          topicsProgressWithComputedMastery.reduce((sum, topic) => sum + topic.mastery, 0) /
-            totalTopics
-        )
-      : 0;
-
-  const getTopicTitle = (slug: string | undefined) => {
-    if (!slug) return "None";
-    const topic = mathTopics.find(t => t.slug === slug);
-    return topic?.title || slug;
-  };
-
-  // Helper function to format quiz percentage to 1 decimal place
-  const formatQuizPercentage = (percentage: number | undefined): string => {
-    if (percentage === undefined || percentage === null) return "0.0%";
-    return `${Math.round(percentage * 10) / 10}%`;
-  };
-
-  // Helper function to format date with proper encoding
-  const formatQuizDate = (submittedAt: any): string => {
-    if (!submittedAt) return "Date unavailable";
-    try {
-      const date = (submittedAt as Timestamp).toDate();
-      return format(date, 'MMM dd, yyyy • h:mm a');
-    } catch (error) {
-      console.error("Error formatting date:", error);
-      return "Date unavailable";
-    }
-  };
 
   if (pageIsLoading) {
     return (
@@ -201,6 +123,45 @@ export default function SimpleProgressPage() {
   if (!user && !authIsLoading) {
     return <Alert variant="default"><AlertTitle>Not Logged In</AlertTitle><AlertDescription>Please log in to view your progress.</AlertDescription></Alert>;
   }
+
+  // ===== Compute overall progress using unified function =====
+  const overallCompletion = calculateStudentProgress({ progress: topicsProgress } as AppUser);
+
+  const masteredTopics = topicsProgress.filter(tp => tp.mastery >= UNLOCK_MASTERY_THRESHOLD).length;
+  const totalTopics = topicsProgress.length;
+
+  const getTopicTitle = (slug: string | undefined) => {
+    if (!slug) return "None";
+    const topic = mathTopics.find(t => t.slug === slug);
+    return topic?.title || slug;
+  };
+
+  const formatQuizPercentage = (percentage: number | undefined): string => {
+    if (percentage === undefined || percentage === null) return "0.0%";
+    return `${Math.round(percentage * 10) / 10}%`;
+  };
+
+  const formatQuizDate = (submittedAt: any): string => {
+    if (!submittedAt) return "Date unavailable";
+    try {
+      const date = (submittedAt as Timestamp).toDate();
+      return format(date, 'MMM dd, yyyy • h:mm a');
+    } catch {
+      return "Date unavailable";
+    }
+  };
+
+  const getScoreColor = (score: number, total: number) => {
+    const percentage = (score / total) * 100;
+    if (percentage >= 80) return "bg-green-100 text-green-800";
+    if (percentage >= 60) return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-800";
+  };
+
+  const completedQuizzes = quizResults.length;
+  const totalPointsEarned = quizResults.reduce((sum, quiz) => sum + ((quiz as any).score ?? (quiz as any).correct ?? 0), 0);
+  const totalPointsPossible = quizResults.reduce((sum, quiz) => sum + ((quiz as any).total ?? 0), 0);
+  const averageScore = completedQuizzes > 0 && totalPointsPossible > 0 ? Math.round((totalPointsEarned / totalPointsPossible) * 100) : null;
 
   return (
     <div className="space-y-8">
@@ -269,12 +230,14 @@ export default function SimpleProgressPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {topicsProgressWithComputedMastery.map((topic, index) => (
+                  {topicsProgress.map((topic, index) => (
                     <TableRow key={index}>
                       <TableCell className="font-medium">
                         <div className="flex flex-col">
-                          <span>{topic.topic}</span>
-                          <Badge variant={topic.status === "Completed" ? "default" : "secondary"} className="w-fit mt-1">{topic.status}</Badge>
+                          <span>{getTopicTitle(topic.topic)}</span>
+                          <Badge variant={topic.mastery >= UNLOCK_MASTERY_THRESHOLD ? "default" : "secondary"} className="w-fit mt-1">
+                            {topic.mastery >= UNLOCK_MASTERY_THRESHOLD ? "Completed" : topic.quizzesAttempted > 0 ? "In Progress" : "Not Started"}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-semibold">{topic.mastery}%</TableCell>
@@ -286,7 +249,6 @@ export default function SimpleProgressPage() {
           </CardContent>
         </Card>
 
-        {/* Fixed Recent Quizzes Section */}
         <Card>
           <CardHeader>
             <CardTitle>Recent Quizzes</CardTitle>
@@ -306,35 +268,20 @@ export default function SimpleProgressPage() {
                   const quizPercentage = quiz.percentage || 0;
                   const formattedPercentage = formatQuizPercentage(quizPercentage);
                   const formattedDate = formatQuizDate(quiz.submittedAt);
-                  
                   return (
-                    <div 
-                      key={index} 
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-                    >
+                    <div key={index} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">
                       <div className="space-y-1">
-                        <p className="font-medium capitalize">
-                          {getTopicTitle(quiz.topic)}
-                        </p>
+                        <p className="font-medium capitalize">{getTopicTitle(quiz.topic)}</p>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <span>{formattedDate}</span>
-                          {quiz.difficulty && (
-                            <>
-                              <span>•</span>
-                              <Badge variant="outline" className="text-xs">
-                                {quiz.difficulty}
-                              </Badge>
-                            </>
-                          )}
+                          {quiz.difficulty && <>
+                            <span>•</span>
+                            <Badge variant="outline" className="text-xs">{quiz.difficulty}</Badge>
+                          </>}
                         </div>
                       </div>
                       <div className="text-right">
-                        <Badge 
-                          className={cn(
-                            "font-semibold text-base px-3 py-1",
-                            getScoreColor(quizPercentage, 100)
-                          )}
-                        >
+                        <Badge className={cn("font-semibold text-base px-3 py-1", getScoreColor(quizPercentage, 100))}>
                           {formattedPercentage}
                         </Badge>
                         <p className="text-xs text-muted-foreground mt-1">
@@ -347,9 +294,7 @@ export default function SimpleProgressPage() {
                 {quizResults.length > 5 && (
                   <div className="text-center pt-2">
                     <Button variant="ghost" size="sm" asChild>
-                      <Link href="/student/quiz-history">
-                        View all {quizResults.length} quizzes
-                      </Link>
+                      <Link href="/student/quiz-history">View all {quizResults.length} quizzes</Link>
                     </Button>
                   </div>
                 )}
@@ -359,7 +304,7 @@ export default function SimpleProgressPage() {
         </Card>
       </div>
 
-      {topicsProgressWithComputedMastery.length > 0 && (
+      {topicsProgress.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Overall Progress Summary</CardTitle>
