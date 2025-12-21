@@ -6,23 +6,22 @@ import { db } from "@/lib/firebase";
 import type { AppUser, QuizResult, CourseContentItem } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, AlertTriangle, Trophy, Star, BookOpen, Target, BarChart3, CheckCircle, Clock } from "lucide-react";
+import { Loader2, AlertTriangle, Trophy, Star, BookOpen, BarChart3, CheckCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getInitials } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FeedbackColumn } from "@/components/leaderboard/FeedbackColumn";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 interface RankedStudent extends AppUser {
   rank: number;
-  overallScore: number;
+  overallProgress: number;
   quizCount: number;
+  averageScore: number;
   topicsMastered: number;
   totalTopics: number;
-  averageScore: number;
   masteryLevel: 'Beginner' | 'Proficient' | 'Advanced' | 'Expert';
 }
 
@@ -38,13 +37,21 @@ interface TeacherTopic {
   teacherName?: string;
 }
 
+interface TopicProgressData {
+  mastery: number;
+  status: string;
+  quizzesAttempted: number;
+  [key: string]: any;
+}
+
+const UNLOCK_MASTERY_THRESHOLD = 75;
+
 export default function LeaderboardPage() {
   const { user: currentUser, role } = useAuth();
   const [allStudents, setAllStudents] = useState<AppUser[]>([]);
   const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [teacherTopics, setTeacherTopics] = useState<TeacherTopic[]>([]);
-  const [allCourseContent, setAllCourseContent] = useState<CourseContentItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,13 +77,17 @@ export default function LeaderboardPage() {
     }
 
     const topicsQuery = query(collection(db, "courseContent"));
-    const courseContentQuery = query(collection(db, "courseContent"));
 
     const unsubscribes: Array<() => void> = [];
 
     const unsubscribeStudents = onSnapshot(studentsQuery, (snapshot) => {
       const students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
       setAllStudents(students);
+      console.log("Loaded students with progress data:", students.map(s => ({
+        name: s.displayName,
+        hasProgress: !!s.progress,
+        progressKeys: s.progress ? Object.keys(s.progress) : []
+      })));
     }, (err) => {
       console.error("Error fetching students:", err);
       setError("Failed to load student data.");
@@ -89,6 +100,7 @@ export default function LeaderboardPage() {
           ...doc.data() 
         } as QuizResult));
         setQuizResults(results);
+        console.log("Loaded quiz results:", results.length);
     }, (err) => {
         console.error("Error fetching quiz results:", err);
         setError("Failed to load quiz results data.");
@@ -118,17 +130,6 @@ export default function LeaderboardPage() {
       console.error("Error fetching topics:", err);
     });
     unsubscribes.push(unsubscribeTopics);
-
-    const unsubscribeCourseContent = onSnapshot(courseContentQuery, (snapshot) => {
-      const content = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      } as CourseContentItem));
-      setAllCourseContent(content);
-    }, (err) => {
-      console.error("Error fetching course content:", err);
-    });
-    unsubscribes.push(unsubscribeCourseContent);
     
     if (sectionsQuery) {
         const unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
@@ -157,101 +158,109 @@ export default function LeaderboardPage() {
       return 'Beginner';
   };
 
-  // Calculate student's overall progress like My Progress page
+  // Calculate student progress using the SAME LOGIC as the progress page
   const calculateStudentProgress = (student: AppUser) => {
-    // Get all quizzes for this student
-    const studentQuizzes = quizResults.filter(r => r.studentId === student.id);
+    // Get student's quiz results
+    const studentQuizResults = quizResults.filter(r => r.studentId === student.id);
+    const completedQuizzes = studentQuizResults.length;
     
-    // Filter by topic if needed
-    const relevantQuizzes = topicFilter === "all" 
-      ? studentQuizzes 
-      : studentQuizzes.filter(r => r.topic === topicFilter);
-    
-    // Calculate quiz-based metrics
-    const quizCount = relevantQuizzes.length;
-    
-    // Calculate average quiz score
+    // Calculate average score from quiz results
     let averageScore = 0;
-    if (quizCount > 0) {
-      const totalScore = relevantQuizzes.reduce((acc, r) => acc + (r.score || 0), 0);
-      const totalPossible = relevantQuizzes.reduce((acc, r) => acc + (r.total || 1), 0);
-      averageScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+    if (completedQuizzes > 0) {
+      const totalPointsEarned = studentQuizResults.reduce((sum, quiz) => {
+        const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
+        return sum + raw;
+      }, 0);
+      const totalPointsPossible = studentQuizResults.reduce((sum, quiz) => {
+        const rawTotal = (quiz as any).total ?? 0;
+        return sum + rawTotal;
+      }, 0);
+      
+      averageScore = totalPointsPossible > 0 
+        ? Math.round((totalPointsEarned / totalPointsPossible) * 100) 
+        : 0;
     }
     
-    // Get unique topics from course content
-    const allTopics = Array.from(new Set(allCourseContent.map(c => c.topic).filter(Boolean)));
-    const totalTopics = allTopics.length;
-    
-    // Calculate topics mastered (based on student's progress data)
-    let topicsMastered = 0;
-    if (student.progress) {
-      const studentProgress = student.progress as Record<string, any>;
+    // Calculate topics from student progress data (same as your progress page)
+    const firestoreProgress = student.progress || {};
+    const topicsProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
+      const topicData = data as TopicProgressData;
+      const quizzesAttempted = topicData.quizzesAttempted || 0;
+      const mastery = topicData.mastery || 0;
+      const status = quizzesAttempted > 0 
+        ? (mastery >= UNLOCK_MASTERY_THRESHOLD ? "Completed" : "In Progress") 
+        : "Not Started";
       
-      if (topicFilter === "all") {
-        // Count all mastered topics
-        Object.keys(studentProgress).forEach(topic => {
-          const topicProgress = studentProgress[topic];
-          if (topicProgress && (topicProgress.masteryLevel === 'mastered' || topicProgress.score >= 80)) {
-            topicsMastered++;
-          }
-        });
+      return {
+        topic: topicKey,
+        mastery,
+        status,
+        quizzesAttempted,
+      };
+    });
+    
+    // Calculate mastery from actual quiz results when available (same as progress page)
+    const topicsProgressWithComputedMastery = topicsProgress.map(tp => {
+      const topicResults = studentQuizResults.filter(q => q.topic === tp.topic);
+      const quizzesAttempted = topicResults.length || tp.quizzesAttempted || 0;
+
+      let mastery = tp.mastery || 0;
+      if (topicResults.length > 0) {
+        const topicPointsEarned = topicResults.reduce((sum, quiz) => {
+          const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
+          return sum + raw;
+        }, 0);
+        const topicPointsPossible = topicResults.reduce((sum, quiz) => {
+          const rawTotal = (quiz as any).total ?? 0;
+          return sum + rawTotal;
+        }, 0);
+
+        mastery = topicPointsPossible > 0 ? Math.round((topicPointsEarned / topicPointsPossible) * 100) : 0;
+      }
+
+      const status = quizzesAttempted > 0
+        ? mastery >= UNLOCK_MASTERY_THRESHOLD
+          ? "Completed"
+          : "In Progress"
+        : "Not Started";
+
+      return {
+        ...tp,
+        mastery,
+        quizzesAttempted,
+        status,
+      };
+    });
+    
+    // Calculate metrics (same as progress page)
+    const totalTopics = topicsProgressWithComputedMastery.length;
+    const masteredTopics = topicsProgressWithComputedMastery.filter(topic => topic.mastery >= 80).length;
+    
+    // Calculate overall completion (same as progress page)
+    let overallProgress = 0;
+    if (totalTopics > 0) {
+      const totalMastery = topicsProgressWithComputedMastery.reduce((sum, topic) => sum + topic.mastery, 0);
+      overallProgress = Math.round(totalMastery / totalTopics);
+    } else if (averageScore > 0) {
+      overallProgress = averageScore;
+    }
+    
+    // Apply topic filter if needed
+    if (topicFilter !== "all") {
+      const filteredTopic = topicsProgressWithComputedMastery.find(t => t.topic === topicFilter);
+      if (filteredTopic) {
+        overallProgress = filteredTopic.mastery;
       } else {
-        // Check if specific topic is mastered
-        const topicProgress = studentProgress[topicFilter];
-        if (topicProgress && (topicProgress.masteryLevel === 'mastered' || topicProgress.score >= 80)) {
-          topicsMastered = 1;
-        }
-      }
-    }
-    
-    // Calculate overall score based on multiple factors (like My Progress page)
-    // This is similar to the "Overall Completion" on My Progress
-    let overallScore = 0;
-    
-    if (topicFilter === "all") {
-      // Overall progress across all topics
-      if (student.progress) {
-        const studentProgress = student.progress as Record<string, any>;
-        const topicKeys = Object.keys(studentProgress);
-        
-        if (topicKeys.length > 0) {
-          let totalTopicScore = 0;
-          topicKeys.forEach(topic => {
-            const topicProgress = studentProgress[topic];
-            if (topicProgress && topicProgress.score) {
-              totalTopicScore += Math.min(topicProgress.score, 100);
-            }
-          });
-          overallScore = Math.round(totalTopicScore / topicKeys.length);
-        }
-      }
-      
-      // If no progress data, use quiz average
-      if (overallScore === 0 && averageScore > 0) {
-        overallScore = averageScore;
-      }
-    } else {
-      // Specific topic progress
-      if (student.progress) {
-        const studentProgress = student.progress as Record<string, any>;
-        const topicProgress = studentProgress[topicFilter];
-        
-        if (topicProgress && topicProgress.score) {
-          overallScore = Math.min(topicProgress.score, 100);
-        } else if (averageScore > 0) {
-          overallScore = averageScore;
-        }
-      } else if (averageScore > 0) {
-        overallScore = averageScore;
+        overallProgress = 0;
       }
     }
     
     return {
-      quizCount,
+      overallProgress,
+      quizCount: completedQuizzes,
       averageScore,
-      totalTopics,
-      topicsMastered,
-      overallScore
+      topicsMastered: masteredTopics,
+      totalTopics
     };
   };
 
@@ -273,19 +282,29 @@ export default function LeaderboardPage() {
       filteredStudents = filteredStudents.filter(s => s.teacherId === currentUser.id);
     }
 
+    // Calculate progress for each student
     const studentScores = filteredStudents.map(student => {
       const progress = calculateStudentProgress(student);
+      
+      console.log("Student progress:", {
+        name: student.displayName,
+        overallProgress: progress.overallProgress,
+        quizCount: progress.quizCount,
+        topicsMastered: progress.topicsMastered,
+        totalTopics: progress.totalTopics,
+        hasProgressData: !!student.progress
+      });
       
       return { 
         ...student, 
         ...progress,
-        masteryLevel: getMasteryLevel(progress.overallScore),
+        masteryLevel: getMasteryLevel(progress.overallProgress),
       };
     });
 
-    // Sort by overall score descending
+    // Sort by overall progress descending
     const sortedStudents = studentScores.sort((a, b) => {
-      if (b.overallScore !== a.overallScore) return b.overallScore - a.overallScore;
+      if (b.overallProgress !== a.overallProgress) return b.overallProgress - a.overallProgress;
       if (b.topicsMastered !== a.topicsMastered) return b.topicsMastered - a.topicsMastered;
       if (b.quizCount !== a.quizCount) return b.quizCount - a.quizCount;
       return (a.displayName || a.username || "").localeCompare(b.displayName || b.username || "");
@@ -296,7 +315,7 @@ export default function LeaderboardPage() {
         ...student,
         rank: index + 1,
     }));
-  }, [allStudents, quizResults, allCourseContent, gradeFilter, topicFilter, role, sectionFilter, currentUser]);
+  }, [allStudents, quizResults, gradeFilter, topicFilter, role, sectionFilter, currentUser]);
   
   const currentUserRanking = useMemo(() => {
       return rankedStudents.find(s => s.id === currentUser?.id);
@@ -324,10 +343,10 @@ export default function LeaderboardPage() {
             <Trophy className="h-8 w-8" /> Progress Leaderboard
           </CardTitle>
           <CardDescription>
-            See overall progress rankings based on quiz performance and topic mastery.
+            See overall progress rankings based on the same calculations as your Progress page.
             <span className="block text-sm text-muted-foreground mt-1">
               <BarChart3 className="inline h-3 w-3 mr-1" />
-              Rankings based on overall progress score (similar to My Progress page).
+              Rankings use the same "Overall Completion" calculation from My Progress page.
             </span>
           </CardDescription>
         </CardHeader>
@@ -340,7 +359,7 @@ export default function LeaderboardPage() {
                     <Star className="h-6 w-6"/> Your Progress Ranking
                  </CardTitle>
                  <CardDescription>
-                   Your overall progress compared to other students
+                   Your overall progress: {currentUserRanking.overallProgress}% (same as My Progress page)
                  </CardDescription>
             </CardHeader>
             <CardContent>
@@ -351,24 +370,43 @@ export default function LeaderboardPage() {
                         <TableHead>Student</TableHead>
                         <TableHead className="text-center">Overall Progress</TableHead>
                         <TableHead className="text-center hidden md:table-cell">Quizzes</TableHead>
+                        <TableHead className="text-center hidden md:table-cell">Avg Score</TableHead>
                         <TableHead className="text-center hidden md:table-cell">Topics</TableHead>
-                        <TableHead className="text-center">Mastery</TableHead>
+                        <TableHead className="text-center">Level</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                         <TableRow className="bg-transparent hover:bg-primary/20">
                             <TableCell className="text-center font-bold text-2xl">{currentUserRanking.rank}</TableCell>
-                            <TableCell className="font-semibold">{currentUserRanking.displayName}</TableCell>
+                            <TableCell className="font-semibold">
+                              <div className="flex items-center gap-3">
+                                <Avatar>
+                                  <AvatarImage src={currentUserRanking.avatarUrl || undefined} alt={currentUserRanking.displayName || "Student"} />
+                                  <AvatarFallback>{getInitials(currentUserRanking.displayName || currentUserRanking.username || "")}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p>{currentUserRanking.displayName}</p>
+                                  {currentUserRanking.gradeLevel && (
+                                    <p className="text-xs text-muted-foreground">{currentUserRanking.gradeLevel}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
                             <TableCell className="text-center">
                               <div className="space-y-1">
-                                <div className="font-bold text-lg">{currentUserRanking.overallScore}%</div>
-                                <Progress value={currentUserRanking.overallScore} className="h-2" />
+                                <div className="font-bold text-lg">{currentUserRanking.overallProgress}%</div>
+                                <Progress value={currentUserRanking.overallProgress} className="h-2" />
                               </div>
                             </TableCell>
                             <TableCell className="text-center hidden md:table-cell">
                               <div className="flex items-center justify-center gap-1">
                                 <CheckCircle className="h-4 w-4 text-green-600" />
                                 <span className="font-medium">{currentUserRanking.quizCount}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center hidden md:table-cell">
+                              <div className="font-medium">
+                                {currentUserRanking.averageScore}%
                               </div>
                             </TableCell>
                             <TableCell className="text-center hidden md:table-cell">
@@ -494,8 +532,8 @@ export default function LeaderboardPage() {
                       <TableHead className="w-16 text-center">Rank</TableHead>
                       <TableHead>Student</TableHead>
                       <TableHead className="text-center">Progress</TableHead>
-                      <TableHead className="text-center hidden md:table-cell">Avg Score</TableHead>
                       <TableHead className="text-center hidden md:table-cell">Quizzes</TableHead>
+                      <TableHead className="text-center hidden md:table-cell">Avg Score</TableHead>
                       <TableHead className="text-center hidden md:table-cell">Topics</TableHead>
                       <TableHead className="text-center">Level</TableHead>
                     </TableRow>
@@ -531,19 +569,19 @@ export default function LeaderboardPage() {
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="space-y-1">
-                              <div className="font-bold text-lg">{student.overallScore}%</div>
-                              <Progress value={student.overallScore} className="h-2" />
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center hidden md:table-cell">
-                            <div className="font-medium">
-                              {student.averageScore}%
+                              <div className="font-bold text-lg">{student.overallProgress}%</div>
+                              <Progress value={student.overallProgress} className="h-2" />
                             </div>
                           </TableCell>
                           <TableCell className="text-center hidden md:table-cell">
                             <Badge variant={student.quizCount > 0 ? "outline" : "secondary"}>
                               {student.quizCount}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-center hidden md:table-cell">
+                            <div className="font-medium">
+                              {student.averageScore}%
+                            </div>
                           </TableCell>
                           <TableCell className="text-center hidden md:table-cell">
                             <div className="text-sm">
