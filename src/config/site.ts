@@ -47,11 +47,6 @@ export const siteConfig: SiteConfig = {
         icon: Target,
       },
       {
-        title: 'Leaderboard',
-        href: '/leaderboard',
-        icon: Trophy,
-      },
-      {
         title: 'Quizzes',
         href: '/student/quizzes',
         icon: BookOpenCheck,
@@ -80,11 +75,6 @@ export const siteConfig: SiteConfig = {
         title: 'Progress Overview',
         href: '/teacher/progress-overview',
         icon: TrendingUp,
-      },
-      {
-        title: 'Leaderboard',
-        href: '/leaderboard',
-        icon: Trophy,
       },
       {
         title: 'Student Management',
@@ -122,11 +112,6 @@ export const siteConfig: SiteConfig = {
         icon: TrendingUp,
       },
       {
-        title: 'Leaderboard',
-        href: '/leaderboard',
-        icon: Trophy,
-      },
-      {
         title: 'Platform Analytics',
         href: '/admin/analytics',
         icon: BarChart3,
@@ -160,11 +145,6 @@ export const siteConfig: SiteConfig = {
         title: 'Progress Overview',
         href: '/principal/progress-overview',
         icon: TrendingUp,
-      },
-      {
-        title: 'Leaderboard',
-        href: '/leaderboard',
-        icon: Trophy,
       },
       {
         title: 'Teacher Management',
