@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Search, Loader2, AlertTriangle, FileText, ChevronRight, Users, BookOpen, BarChart3, Eye, UserCheck, GraduationCap, Download } from "lucide-react";
+import { Search, Loader2, AlertTriangle, FileText, ChevronRight, Users, BookOpen, BarChart3, Eye, UserCheck, GraduationCap, Download, UserCog } from "lucide-react";
 import type { CourseContentItem, AppUser, QuizResult } from "@/types";
 import { mathTopics } from "@/config/topics";
 import Link from 'next/link';
@@ -74,45 +74,14 @@ export default function PrincipalSearchPage() {
             totalAttempts: totalAttempts,
             averageScore: averageScore,
           };
-        } else {
-          // Get resource download count from resourceDownloads collection if it exists
-          let downloadCount = 0;
-          try {
-            const resourceStatsQuery = query(
-              collection(db, "resourceDownloads"),
-              where("resourceId", "==", item.id)
-            );
-            const resourceStatsSnapshot = await getDocs(resourceStatsQuery);
-            downloadCount = resourceStatsSnapshot.docs.length;
-          } catch (err) {
-            // If collection doesn't exist, check student progress for resource access
-            const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
-            const studentsSnapshot = await getDocs(studentsQuery);
-            
-            for (const studentDoc of studentsSnapshot.docs) {
-              const studentData = studentDoc.data() as AppUser;
-              const studentProgress = studentData.progress as Record<string, any> | undefined;
-              
-              // Check if student has any activity that might indicate resource access
-              if (studentProgress && item.topic) {
-                const topicProgress = studentProgress[item.topic];
-                if (topicProgress && topicProgress.lastActivity) {
-                  downloadCount++;
-                }
-              }
-            }
-          }
-          
-          stats[item.id] = {
-            totalDownloads: downloadCount,
-          };
         }
+        // REMOVED: No longer fetching download stats for resources
       }
       
       setContentStats(stats);
     } catch (err) {
       console.error("Error fetching content stats:", err);
-      // Fallback to zero values if stats collection doesn't exist
+      // Only set quiz stats, not resource stats
       const fallbackStats: Record<string, ContentStats> = {};
       content.forEach(item => {
         if (item.contentType === 'quiz') {
@@ -120,11 +89,8 @@ export default function PrincipalSearchPage() {
             totalAttempts: 0,
             averageScore: 0,
           };
-        } else {
-          fallbackStats[item.id] = {
-            totalDownloads: 0,
-          };
         }
+        // No stats for resources
       });
       setContentStats(fallbackStats);
     }
@@ -151,7 +117,7 @@ export default function PrincipalSearchPage() {
 
       const userQuery = query(
         collection(db, "users"),
-        where("role", "in", ["student", "teacher"])
+        where("role", "in", ["student", "teacher", "principal", "admin"])
       );
       const userSnapshot = await getDocs(userQuery);
       const allUsers: AppUser[] = userSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
@@ -252,6 +218,23 @@ export default function PrincipalSearchPage() {
   const getActionButtonIcon = (item: CourseContentItem) => {
     return item.contentType === 'quiz' ? <BarChart3 className="h-4 w-4" /> : <Eye className="h-4 w-4" />;
   };
+  
+  const getRoleBasedData = (role: string) => {
+    switch (role) {
+      case 'teacher':
+        return { icon: <UserCheck className="h-4 w-4" />, linkText: 'Manage Teacher', badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-300' };
+      case 'student':
+        return { icon: <GraduationCap className="h-4 w-4" />, linkText: 'View Student', badgeClass: 'bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-300' };
+      case 'principal':
+        return { icon: <UserCog className="h-4 w-4" />, linkText: 'Manage Principal', badgeClass: 'bg-purple-100 text-purple-700 dark:bg-purple-700/30 dark:text-purple-300' };
+      case 'admin':
+        return { icon: <UserCog className="h-4 w-4" />, linkText: 'Manage Admin', badgeClass: 'bg-red-100 text-red-700 dark:bg-red-700/30 dark:text-red-300' };
+      default:
+        return { icon: <Users className="h-4 w-4" />, linkText: 'View User', badgeClass: '' };
+    }
+};
+
+
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -306,40 +289,34 @@ export default function PrincipalSearchPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4">
-            {results.users.map(user => (
-              <div key={user.id} className="p-4 border rounded-lg flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4 flex-1">
-                  <Avatar>
-                    <AvatarImage src={user.avatarUrl || undefined} alt={user.displayName || ''} />
-                    <AvatarFallback>
-                      {user.role === 'teacher' ? 
-                        <UserCheck className="h-4 w-4" /> : 
-                        <GraduationCap className="h-4 w-4" />
-                      }
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-lg">{user.displayName}</h4>
-                    <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-                      <span>@{user.username}</span>
-                      <Badge variant={user.role === 'teacher' ? "default" : "secondary"} className="capitalize">
-                        {user.role}
-                      </Badge>
+            {results.users.map(user => {
+              const { icon, linkText, badgeClass } = getRoleBasedData(user.role);
+              return (
+                <div key={user.id} className="p-4 border rounded-lg flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 flex-1">
+                    <Avatar>
+                      <AvatarImage src={user.avatarUrl || undefined} alt={user.displayName || ''} />
+                      <AvatarFallback>{icon}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-lg">{user.displayName}</h4>
+                      <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
+                        <span>@{user.username}</span>
+                        <Badge className={`capitalize ${badgeClass}`}>
+                          {user.role}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/admin/users`}>
+                      {linkText}
+                      <ChevronRight className="ml-2 h-4 w-4"/>
+                    </Link>
+                  </Button>
                 </div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href={
-                    user.role === 'teacher' 
-                      ? `/principal/teachers`
-                      : `/principal/students`
-                  }>
-                    {user.role === 'teacher' ? 'Manage Teacher' : 'View Student'}
-                    <ChevronRight className="ml-2 h-4 w-4"/>
-                  </Link>
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -388,34 +365,21 @@ export default function PrincipalSearchPage() {
                         </span>
                       </div>
 
-                      {contentStats[item.id] && (
+                      {/* Only show stats for quizzes, not for resources */}
+                      {item.contentType === 'quiz' && contentStats[item.id] && (
                         <div className="flex flex-wrap gap-4 mt-2">
-                          {item.contentType === 'quiz' ? (
-                            <>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sm font-medium">Attempts:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.totalAttempts || 0}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sm font-medium">Avg Score:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.averageScore || 0}%
-                                </span>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="flex items-center gap-1">
-                                <Download className="h-3 w-3" />
-                                <span className="text-sm font-medium">Downloads:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.totalDownloads || 0}
-                                </span>
-                              </div>
-                            </>
-                          )}
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-medium">Attempts:</span>
+                            <span className="text-sm text-muted-foreground">
+                              {contentStats[item.id]?.totalAttempts || 0}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-medium">Avg Score:</span>
+                            <span className="text-sm text-muted-foreground">
+                              {contentStats[item.id]?.averageScore || 0}%
+                            </span>
+                          </div>
                         </div>
                       )}
 
@@ -427,7 +391,7 @@ export default function PrincipalSearchPage() {
                 </div>
                 
                 <Button asChild variant="outline" size="sm" className="w-full sm:w-auto shrink-0">
-                  <Link href={item.contentType === 'quiz' ? `/principal/analytics/quizzes/${item.id}?q=${searchQuery}` : `/principal/analytics/resources/${item.id}?q=${searchQuery}`}>
+                  <Link href={item.contentType === 'quiz' ? `/admin/analytics/quizzes/${item.id}?q=${searchQuery}` : `/admin/analytics/resources/${item.id}?q=${searchQuery}`}>
                     {getActionButtonIcon(item)}
                     {getActionButtonText(item)}
                     <ChevronRight className="ml-2 h-4 w-4"/>
