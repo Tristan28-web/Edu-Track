@@ -11,9 +11,6 @@ import type { CourseContentItem, AppUser, QuizResult } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import { PieChart, Pie, Cell } from 'recharts';
-import { Users, TrendingUp, Target, CheckCircle, XCircle, Calendar } from "lucide-react";
-
 
 interface QuizAnalytics {
   quiz: (CourseContentItem & { teacher?: AppUser }) | null;
