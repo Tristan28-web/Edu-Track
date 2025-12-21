@@ -2,27 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, AlertTriangle, Download, User, BookOpen, Users, Eye, Calendar, FileText } from "lucide-react";
+import { Loader2, AlertTriangle, FileText, Calendar, BookOpen, User, Clock, FileType, Eye, Download } from "lucide-react";
 import type { CourseContentItem, AppUser } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
 
-interface ResourceAccess {
-  student: AppUser;
-  accessedAt: Date | null;
-}
-
 interface ResourceAnalytics {
   resource: (CourseContentItem & { teacher?: AppUser }) | null;
-  totalAccesses: number;
-  totalStudents: number;
-  accesses: ResourceAccess[];
-  lastAccessDate: Date | null;
 }
 
 export default function ResourceAnalyticsPage() {
@@ -39,7 +29,6 @@ export default function ResourceAnalyticsPage() {
       setIsLoading(true);
       setError(null);
       try {
-        // 1. Fetch resource data
         const resourceDocRef = doc(db, "courseContent", id);
         const resourceDoc = await getDoc(resourceDocRef);
 
@@ -51,7 +40,7 @@ export default function ResourceAnalyticsPage() {
 
         const resourceData = { id: resourceDoc.id, ...resourceDoc.data() } as CourseContentItem;
         
-        // 2. Fetch teacher data if available
+        // Fetch teacher data
         let teacherData: AppUser | undefined = undefined;
         if (resourceData.teacherId) {
           const teacherDoc = await getDoc(doc(db, "users", resourceData.teacherId));
@@ -59,98 +48,9 @@ export default function ResourceAnalyticsPage() {
             teacherData = { id: teacherDoc.id, ...teacherDoc.data() } as AppUser;
           }
         }
-        
-        // 3. Fetch all students
-        const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
-        const studentsSnapshot = await getDocs(studentsQuery);
-        
-        // 4. Check resource access through multiple methods
-        const accessDetails: ResourceAccess[] = [];
-        let totalAccessCount = 0;
-        let lastAccessDate: Date | null = null;
-        
-        // Method 1: Check if resourceDownloads collection exists
-        try {
-          const downloadsQuery = query(collection(db, "resourceDownloads"), where("resourceId", "==", id));
-          const downloadsSnapshot = await getDocs(downloadsQuery);
-          
-          if (!downloadsSnapshot.empty) {
-            for (const downloadDoc of downloadsSnapshot.docs) {
-              const downloadData = downloadDoc.data();
-              const studentDoc = await getDoc(doc(db, "users", downloadData.studentId));
-              if (studentDoc.exists()) {
-                totalAccessCount++;
-                const accessDate = downloadData.downloadedAt?.toDate?.() || new Date();
-                if (!lastAccessDate || accessDate > lastAccessDate) {
-                  lastAccessDate = accessDate;
-                }
-                
-                accessDetails.push({
-                  student: { id: studentDoc.id, ...studentDoc.data() } as AppUser,
-                  accessedAt: accessDate,
-                });
-              }
-            }
-          }
-        } catch (err) {
-          console.log("resourceDownloads collection not found, trying alternative methods...");
-        }
-        
-        // Method 2: Check student progress data for resource access
-        // This assumes resources are tracked in student progress
-        if (totalAccessCount === 0) {
-          for (const studentDoc of studentsSnapshot.docs) {
-            const studentId = studentDoc.id;
-            const studentData = { id: studentDoc.id, ...studentDoc.data() } as AppUser;
-            
-            // Check student's progress for this resource
-            const studentProgress = studentData.progress as Record<string, any> | undefined;
-            if (studentProgress && resourceData.topic) {
-              const topicProgress = studentProgress[resourceData.topic];
-              if (topicProgress && topicProgress.lastActivity) {
-                totalAccessCount++;
-                const accessDate = topicProgress.lastActivity.toDate();
-                if (!lastAccessDate || accessDate > lastAccessDate) {
-                  lastAccessDate = accessDate;
-                }
-                
-                accessDetails.push({
-                  student: studentData,
-                  accessedAt: accessDate,
-                });
-              }
-            }
-            
-            // Alternative: Check if student has accessed materials in general
-            // This is a fallback if specific resource tracking isn't available
-            else if (studentData.lastLogin) {
-              totalAccessCount++;
-              const accessDate = studentData.lastLogin.toDate();
-              if (!lastAccessDate || accessDate > lastAccessDate) {
-                lastAccessDate = accessDate;
-              }
-              
-              accessDetails.push({
-                student: studentData,
-                accessedAt: accessDate,
-              });
-            }
-          }
-        }
-        
-        // Sort by access date (most recent first)
-        const sortedAccesses = accessDetails.sort((a, b) => {
-          if (!a.accessedAt) return 1;
-          if (!b.accessedAt) return -1;
-          return b.accessedAt.getTime() - a.accessedAt.getTime();
-        });
 
         setAnalytics({
           resource: { ...resourceData, teacher: teacherData },
-          totalAccesses: totalAccessCount,
-          totalStudents: studentsSnapshot.size,
-          accesses: sortedAccesses,
-          lastAccessDate,
         });
 
       } catch (err: any) {
@@ -168,7 +68,7 @@ export default function ResourceAnalyticsPage() {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">Loading analytics...</span>
+        <span className="ml-3 text-muted-foreground">Loading resource details...</span>
       </div>
     );
   }
@@ -187,178 +87,245 @@ export default function ResourceAnalyticsPage() {
     return (
       <Alert className="max-w-4xl mx-auto">
         <AlertTitle>No Data Found</AlertTitle>
-        <AlertDescription>No analytics data available for this resource.</AlertDescription>
+        <AlertDescription>No data available for this resource.</AlertDescription>
       </Alert>
     );
   }
 
-  // Calculate access rate
-  const accessRate = analytics.totalStudents > 0 
-    ? Math.round((analytics.totalAccesses / analytics.totalStudents) * 100)
-    : 0;
+  // Get file extension for resource type badge
+  const getFileExtension = (filename: string) => {
+    const parts = filename.split('.');
+    return parts.length > 1 ? parts.pop()?.toUpperCase() : 'FILE';
+  };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
-      <Card className="shadow-sm">
-        <CardHeader>
-          <div className="flex justify-between items-start">
-            <div>
-              <CardTitle className="text-3xl font-headline text-primary flex items-center gap-2">
-                <BookOpen className="h-8 w-8" /> {analytics.resource.title}
-              </CardTitle>
-              <CardDescription className="mt-2">
-                {analytics.resource.description}
-              </CardDescription>
-              {analytics.resource.teacher && (
-                <div className="flex items-center gap-2 mt-3">
-                  <Badge variant="outline" className="text-sm">
-                    Created by: {analytics.resource.teacher.displayName}
-                  </Badge>
-                  {analytics.resource.topic && (
-                    <Badge variant="secondary" className="text-sm">
-                      Topic: {analytics.resource.topic}
-                    </Badge>
-                  )}
+    <div className="space-y-6 max-w-3xl mx-auto">
+      {/* Main Resource Information Card */}
+      <Card className="shadow-lg border-t-4 border-t-primary">
+        <CardHeader className="pb-4">
+          <div className="flex items-start justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-primary/10 rounded-xl">
+                  <FileText className="h-8 w-8 text-primary" />
                 </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant={analytics.resource.isArchived ? "secondary" : "default"}>
-                {analytics.resource.isArchived ? "Archived" : "Published"}
-              </Badge>
+                <div>
+                  <CardTitle className="text-3xl font-bold text-gray-900">
+                    {analytics.resource.title}
+                  </CardTitle>
+                  <CardDescription className="text-lg mt-1">
+                    Resource Details & Analytics
+                  </CardDescription>
+                </div>
+              </div>
             </div>
           </div>
         </CardHeader>
+        
+        <CardContent className="pt-0">
+          <div className="space-y-6">
+            {/* Teacher Information */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="flex items-center gap-3 mb-3">
+                <User className="h-5 w-5 text-gray-600" />
+                <h3 className="text-lg font-semibold">Published By Teacher</h3>
+              </div>
+              {analytics.resource.teacher ? (
+                <div className="space-y-2 pl-2">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
+                      <span className="font-semibold">
+                        {analytics.resource.teacher.displayName?.charAt(0) || 'T'}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="font-semibold">{analytics.resource.teacher.displayName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Username: @{analytics.resource.username || analytics.resource.teacher.username}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted-foreground pl-2">Teacher information not available</p>
+              )}
+            </div>
+
+            {/* Resource Metadata */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Publication Timeline
+                </h3>
+                <div className="space-y-2 pl-6">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Date Published</p>
+                    <p className="font-medium">
+                      {analytics.resource.createdAt 
+                        ? format(analytics.resource.createdAt.toDate(), 'EEEE, MMMM do, yyyy')
+                        : 'Date not available'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Time Published</p>
+                    <p className="font-medium">
+                      {analytics.resource.createdAt 
+                        ? format(analytics.resource.createdAt.toDate(), 'h:mm a')
+                        : 'Time not available'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last Updated</p>
+                    <p className="font-medium">
+                      {analytics.resource.updatedAt 
+                        ? format(analytics.resource.updatedAt.toDate(), 'MMM d, yyyy • h:mm a')
+                        : analytics.resource.createdAt 
+                          ? format(analytics.resource.createdAt.toDate(), 'MMM d, yyyy • h:mm a')
+                          : 'Never updated'
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Resource Details
+                </h3>
+                <div className="space-y-2 pl-6">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Topic / Subject</p>
+                    <p className="font-medium">
+                      {analytics.resource.topic || 'No topic specified'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">File Type</p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="font-mono">
+                        {getFileExtension(analytics.resource.title)}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">Document</span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Status</p>
+                    <Badge 
+                      variant={analytics.resource.isArchived ? "secondary" : "default"}
+                      className="mt-1"
+                    >
+                      {analytics.resource.isArchived ? "📁 Archived" : "✅ Active"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Resource Description */}
+            {analytics.resource.description && (
+              <div className="border-t pt-4">
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Resource Description
+                </h3>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-gray-700 whitespace-pre-line">
+                    {analytics.resource.description}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Stats */}
+            <div className="border-t pt-4">
+              <h3 className="font-semibold mb-3">Resource Summary</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-3 border rounded-lg">
+                  <div className="inline-flex items-center justify-center w-10 h-10 bg-blue-100 rounded-full mb-2">
+                    <Eye className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Visibility</p>
+                  <p className="font-semibold">
+                    {analytics.resource.isArchived ? 'Archived' : 'Public'}
+                  </p>
+                </div>
+                
+                <div className="text-center p-3 border rounded-lg">
+                  <div className="inline-flex items-center justify-center w-10 h-10 bg-green-100 rounded-full mb-2">
+                    <Download className="h-5 w-5 text-green-600" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Available</p>
+                  <p className="font-semibold">For Download</p>
+                </div>
+                
+                <div className="text-center p-3 border rounded-lg">
+                  <div className="inline-flex items-center justify-center w-10 h-10 bg-purple-100 rounded-full mb-2">
+                    <Clock className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Duration</p>
+                  <p className="font-semibold">Permanent</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Accesses</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{analytics.totalAccesses}</div>
-            <p className="text-xs text-muted-foreground">
-              {analytics.totalStudents} total students
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Access Rate</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{accessRate}%</div>
-            <p className="text-xs text-muted-foreground">
-              Of students accessed
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Last Accessed</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {analytics.lastAccessDate ? format(analytics.lastAccessDate, 'MMM dd') : 'Never'}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {analytics.lastAccessDate ? format(analytics.lastAccessDate, 'yyyy') : 'No access yet'}
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Resource Type</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {analytics.resource.contentType === 'lessonMaterial' ? 'Resource' : 'Unknown'}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Learning material
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
+      {/* Quick Stats Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Student Access History
-          </CardTitle>
+          <CardTitle className="text-lg">Resource Information</CardTitle>
           <CardDescription>
-            {analytics.totalAccesses > 0 
-              ? `Students who have accessed this resource (${analytics.accesses.length} shown)`
-              : 'No students have accessed this resource yet'
-            }
+            All details about this educational resource
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {analytics.accesses.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
-              {analytics.accesses.slice(0, 10).map((access, index) => (
-                <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <Avatar>
-                      <AvatarImage 
-                        src={access.student.avatarUrl || undefined} 
-                        alt={access.student.displayName || 'Student'}
-                      />
-                      <AvatarFallback>
-                        <User className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-semibold">{access.student.displayName || 'Unknown Student'}</p>
-                      <div className="text-sm text-muted-foreground space-y-1">
-                        <p>@{access.student.username || 'no-username'}</p>
-                        {access.student.sectionName && (
-                          <p className="text-xs">Section: {access.student.sectionName}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {access.accessedAt ? (
-                      <>
-                        <p className="text-sm font-medium">
-                          {format(access.accessedAt, 'MMM dd, yyyy')}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {format(access.accessedAt, 'h:mm a')}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No access date</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {analytics.accesses.length > 10 && (
-                <div className="text-center pt-3 border-t">
-                  <p className="text-sm text-muted-foreground">
-                    Showing 10 of {analytics.accesses.length} accesses
-                  </p>
-                </div>
-              )}
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">Resource ID</span>
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded">{id}</code>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">Content Type</span>
+                <Badge variant="outline">Lesson Material</Badge>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">Teacher ID</span>
+                <code className="text-sm bg-gray-100 px-2 py-1 rounded">
+                  {analytics.resource.teacherId || 'N/A'}
+                </code>
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-              <BookOpen className="h-12 w-12 mb-3 opacity-50" />
-              <p>No students have accessed this resource yet</p>
-              <p className="text-sm mt-1">Student access data will appear here</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">File Name</span>
+                <span className="font-medium truncate max-w-[200px]">{analytics.resource.title}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">Created At</span>
+                <span className="font-medium">
+                  {analytics.resource.createdAt 
+                    ? format(analytics.resource.createdAt.toDate(), 'MM/dd/yyyy')
+                    : 'N/A'
+                  }
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b">
+                <span className="text-muted-foreground">Last Modified</span>
+                <span className="font-medium">
+                  {analytics.resource.updatedAt 
+                    ? format(analytics.resource.updatedAt.toDate(), 'MM/dd/yyyy')
+                    : format(analytics.resource.createdAt?.toDate() || new Date(), 'MM/dd/yyyy')
+                  }
+                </span>
+              </div>
             </div>
-          )}
+          </div>
         </CardContent>
       </Card>
     </div>
