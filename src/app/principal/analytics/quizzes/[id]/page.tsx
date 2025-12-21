@@ -50,16 +50,34 @@ export default function QuizAnalyticsPage() {
           }
         }
 
-        const resultsQuery = query(collection(db, "quizResults"), where("quizId", "==", id));
-        const resultsSnapshot = await getDocs(resultsQuery);
-        const resultsData = resultsSnapshot.docs.map(doc => doc.data() as QuizResult);
+        // Get all students
+        const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
+        const studentsSnapshot = await getDocs(studentsQuery);
+        
+        // Fetch quiz results from each student's subcollection
+        const allResults: QuizResult[] = [];
+        
+        for (const studentDoc of studentsSnapshot.docs) {
+          const studentId = studentDoc.id;
+          const quizResultsQuery = query(
+            collection(db, `users/${studentId}/quizResults`),
+            where("quizId", "==", id)
+          );
+          const resultsSnapshot = await getDocs(quizResultsQuery);
+          
+          if (!resultsSnapshot.empty) {
+            resultsSnapshot.forEach(doc => {
+              allResults.push(doc.data() as QuizResult);
+            });
+          }
+        }
 
-        const totalAttempts = resultsData.length;
-        const averageScore = totalAttempts > 0 ? resultsData.reduce((sum, r) => sum + r.score, 0) / totalAttempts : 0;
+        const totalAttempts = allResults.length;
+        const averageScore = totalAttempts > 0 ? allResults.reduce((sum, r) => sum + (r.percentage || 0), 0) / totalAttempts : 0;
         
         setAnalytics({
           quiz: { ...quizData, teacher: teacherData },
-          results: resultsData,
+          results: allResults,
           totalAttempts: totalAttempts,
           averageScore: Math.round(averageScore),
         });
@@ -76,7 +94,7 @@ export default function QuizAnalyticsPage() {
   }, [id]);
   
   const scoreDistribution = analytics ? analytics.results.reduce((acc, result) => {
-    const score = result.score;
+    const score = result.percentage || 0;
     if (score >= 90) acc['90-100']++;
     else if (score >= 80) acc['80-89']++;
     else if (score >= 70) acc['70-79']++;
