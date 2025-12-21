@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import type { AppUser } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, AlertTriangle, Trophy, BookOpen, Target } from "lucide-react";
+import { Loader2, AlertTriangle, Trophy, BookOpen } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getInitials } from "@/lib/utils";
@@ -159,15 +159,6 @@ export default function LeaderboardPage() {
     const studentScores = filteredStudents.map(student => {
       const progress = calculateStudentProgress(student);
       
-      console.log("Student progress calculation:", {
-        name: student.displayName,
-        overallProgress: progress.overallProgress,
-        progressData: student.progress ? Object.entries(student.progress).map(([key, data]) => ({
-          topic: key,
-          mastery: (data as TopicProgressData).mastery
-        })) : []
-      });
-      
       return { 
         ...student, 
         ...progress,
@@ -199,10 +190,6 @@ export default function LeaderboardPage() {
           </CardTitle>
           <CardDescription>
             Rankings based on the exact same overall progress calculation as My Progress page.
-            <span className="block text-sm text-muted-foreground mt-1">
-              <Target className="inline h-3 w-3 mr-1" />
-              Using stored mastery values from user progress data (Geometry: 60%, Algebra: 43% → 52% overall)
-            </span>
           </CardDescription>
         </CardHeader>
       </Card>
@@ -271,61 +258,44 @@ export default function LeaderboardPage() {
                 </TableHeader>
                 <TableBody>
                   {rankedStudents.length > 0 ? (
-                    rankedStudents.map((student) => {
-                      // Find current user's progress for debugging
-                      const isCurrentUser = student.id === currentUser?.id;
-                      
-                      return (
-                        <TableRow key={student.id} className={isCurrentUser ? "bg-primary/5" : "hover:bg-muted/50"}>
-                          <TableCell className="text-center font-bold text-lg">
-                            <div className="flex items-center justify-center">
-                              {getRankMedal(student.rank) || student.rank}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <Avatar>
-                                <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
-                                <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
-                                {canSeeFullName && student.gradeLevel && (
-                                  <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
-                                )}
-                                {isCurrentUser && student.progress && (
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    Topics: {Object.keys(student.progress).join(", ")}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <div className="space-y-1">
-                              <div className="font-bold text-lg">{student.overallProgress}%</div>
-                              <Progress value={student.overallProgress} className="h-2" />
-                              {isCurrentUser && student.progress && (
-                                <div className="text-xs text-muted-foreground">
-                                  ({Object.entries(student.progress).map(([key, data]) => 
-                                    `${key}: ${(data as TopicProgressData).mastery}%`
-                                  ).join(", ")})
-                                </div>
+                    rankedStudents.map((student) => (
+                      <TableRow key={student.id} className={student.id === currentUser?.id ? "bg-primary/5" : "hover:bg-muted/50"}>
+                        <TableCell className="text-center font-bold text-lg">
+                          <div className="flex items-center justify-center">
+                            {getRankMedal(student.rank) || student.rank}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar>
+                              <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
+                              <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
+                              {canSeeFullName && student.gradeLevel && (
+                                <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
                               )}
                             </div>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <Badge variant={
-                              student.masteryLevel === 'Expert' ? 'default' :
-                              student.masteryLevel === 'Advanced' ? 'secondary' :
-                              student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
-                            }>
-                              {student.masteryLevel}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="space-y-1">
+                            <div className="font-bold text-lg">{student.overallProgress}%</div>
+                            <Progress value={student.overallProgress} className="h-2" />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={
+                            student.masteryLevel === 'Expert' ? 'default' :
+                            student.masteryLevel === 'Advanced' ? 'secondary' :
+                            student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
+                          }>
+                            {student.masteryLevel}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
                   ) : (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center h-32">
