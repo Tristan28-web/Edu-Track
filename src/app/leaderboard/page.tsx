@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import { collection, query, where, onSnapshot, getDocs } from "firebase/firestore";  // Added getDocs
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/lib/firebase";
 import {
@@ -22,7 +22,7 @@ import {
 import { Loader2, Trophy, BookOpen } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import type { AppUser } from "@/types";
+import type { AppUser, QuizResult } from "@/types";  // Added QuizResult
 import { getInitials } from "@/lib/utils";
 import {
   Select,
@@ -34,12 +34,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
-interface TopicProgressData {
-  totalItems?: number;
-  correctItems?: number;
-  quizzesAttempted?: number;
-}
-
 interface RankedStudent extends AppUser {
   rank: number;
   overallProgress: number;
@@ -49,6 +43,7 @@ interface RankedStudent extends AppUser {
 export default function ProgressLeaderboardPage() {
   const { user: currentUser, role } = useAuth();
   const [allStudents, setAllStudents] = useState<AppUser[]>([]);
+  const [rankedStudents, setRankedStudents] = useState<RankedStudent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [gradeFilter, setGradeFilter] = useState<string>("all");
@@ -87,30 +82,33 @@ export default function ProgressLeaderboardPage() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // 🔥 Weighted topic-based mastery calculation (matches Progress page)
-  const calculateStudentProgress = (student: AppUser): number => {
-    const progress = student.progress || {};
+  // 🔥 Updated: Async calculation from quiz results (matches progress page)
+  const calculateStudentProgress = async (student: AppUser): Promise<number> => {
+    const quizResultsRef = collection(db, `users/${student.id}/quizResults`);
+    const snapshot = await getDocs(query(quizResultsRef));
+    const results = snapshot.docs.map(doc => doc.data() as QuizResult);
 
     const topicMasteries: number[] = [];
+    const topics = Object.keys(student.progress || {});  // Use student's progress keys as topics
 
-    Object.values(progress).forEach((data) => {
-      const topic = data as TopicProgressData;
+    topics.forEach(topicKey => {
+      const topicResults = results.filter(q => q.topic === topicKey);
+      if (topicResults.length > 0) {
+        const topicPointsEarned = topicResults.reduce((sum, quiz) => {
+          const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
+          return sum + raw;
+        }, 0);
+        const topicPointsPossible = topicResults.reduce((sum, quiz) => {
+          const rawTotal = (quiz as any).total ?? 0;
+          return sum + rawTotal;
+        }, 0);
 
-      if (!topic.quizzesAttempted || topic.quizzesAttempted === 0) return;
-
-      const totalItems = topic.totalItems || 0;
-      const correctItems = topic.correctItems || 0;
-
-      if (totalItems === 0) return;
-
-      const mastery = (correctItems / totalItems) * 100;
-      topicMasteries.push(mastery);
+        const mastery = topicPointsPossible > 0 ? (topicPointsEarned / topicPointsPossible) * 100 : 0;
+        topicMasteries.push(mastery);
+      }
     });
 
-    if (topicMasteries.length === 0) return 0;
-
-    const total = topicMasteries.reduce((sum, m) => sum + m, 0);
-    return Math.round(total / topicMasteries.length);
+    return topicMasteries.length > 0 ? Math.round(topicMasteries.reduce((sum, m) => sum + m, 0) / topicMasteries.length) : 0;
   };
 
   const getMasteryLevel = (score: number): RankedStudent["masteryLevel"] => {
@@ -120,30 +118,43 @@ export default function ProgressLeaderboardPage() {
     return "Beginner";
   };
 
-  const rankedStudents = useMemo(() => {
-    let students = [...allStudents];
+  // 🔥 Updated: Use useEffect for async fetching
+  useEffect(() => {
+    const fetchRankedStudents = async () => {
+      let students = [...allStudents];
 
-    if (gradeFilter !== "all") {
-      students = students.filter(
-        (s) => s.gradeLevel === gradeFilter
+      if (gradeFilter !== "all") {
+        students = students.filter(
+          (s) => s.gradeLevel === gradeFilter
+        );
+      }
+
+      const withProgress = await Promise.all(
+        students.map(async (student) => {
+          const overallProgress = await calculateStudentProgress(student);
+          return {
+            ...student,
+            overallProgress,
+            masteryLevel: getMasteryLevel(overallProgress),
+          };
+        })
       );
+
+      const ranked = withProgress
+        .sort((a, b) => b.overallProgress - a.overallProgress)
+        .map((student, index) => ({
+          ...student,
+          rank: index + 1,
+        }));
+
+      setRankedStudents(ranked);
+    };
+
+    if (allStudents.length > 0) {
+      fetchRankedStudents();
+    } else {
+      setRankedStudents([]);
     }
-
-    const withProgress = students.map((student) => {
-      const overallProgress = calculateStudentProgress(student);
-      return {
-        ...student,
-        overallProgress,
-        masteryLevel: getMasteryLevel(overallProgress),
-      };
-    });
-
-    return withProgress
-      .sort((a, b) => b.overallProgress - a.overallProgress)
-      .map((student, index) => ({
-        ...student,
-        rank: index + 1,
-      }));
   }, [allStudents, gradeFilter]);
 
   const canSeeFullName =
@@ -212,54 +223,53 @@ export default function ProgressLeaderboardPage() {
             <TableBody>
               {rankedStudents.length > 0 ? (
                 rankedStudents.map((student) => (
-                  <TableRow key={student.id}>
-                    <TableCell className="text-center font-bold">
-                      {student.rank}
-                    </TableCell>
+                  <TableCell className="text-center font-bold">
+                    {student.rank}
+                  </TableCell>
 
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarImage src={student.avatarUrl} />
-                          <AvatarFallback>
-                            {getInitials(
-                              student.displayName ||
-                                student.username ||
-                                ""
-                            )}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-semibold">
-                            {canSeeFullName
-                              ? student.displayName || student.username
-                              : student.username}
-                          </p>
-                          {canSeeFullName && (
-                            <p className="text-xs text-muted-foreground">
-                              {student.gradeLevel}
-                            </p>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <Avatar>
+                        <AvatarImage src={student.avatarUrl} />
+                        <AvatarFallback>
+                          {getInitials(
+                            student.displayName ||
+                              student.username ||
+                              ""
                           )}
-                        </div>
-                      </div>
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <div className="space-y-1">
-                        <p className="font-bold">
-                          {student.overallProgress}%
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-semibold">
+                          {canSeeFullName
+                            ? student.displayName || student.username
+                            : student.username}
                         </p>
-                        <Progress
-                          value={student.overallProgress}
-                          className="h-2"
-                        />
+                        {canSeeFullName && (
+                          <p className="text-xs text-muted-foreground">
+                            {student.gradeLevel}
+                          </p>
+                        )}
                       </div>
-                    </TableCell>
+                    </div>
+                  </TableCell>
 
-                    <TableCell className="text-center">
-                      <Badge>{student.masteryLevel}</Badge>
-                    </TableCell>
-                  </TableRow>
+                  <TableCell className="text-center">
+                    <div className="space-y-1">
+                      <p className="font-bold">
+                        {student.overallProgress}%
+                      </p>
+                      <Progress
+                        value={student.overallProgress}
+                        className="h-2"
+                      />
+                    </div>
+                  </TableCell>
+
+                  <TableCell className="text-center">
+                    <Badge>{student.masteryLevel}</Badge>
+                  </TableCell>
+                </TableRow>
                 ))
               ) : (
                 <TableRow>
