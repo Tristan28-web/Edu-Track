@@ -223,53 +223,54 @@ export default function ProgressLeaderboardPage() {
             <TableBody>
               {rankedStudents.length > 0 ? (
                 rankedStudents.map((student) => (
-                  <TableCell className="text-center font-bold">
-                    {student.rank}
-                  </TableCell>
+                  <TableRow key={student.id}>  {/* Fixed: Added <TableRow> */}
+                    <TableCell className="text-center font-bold">
+                      {student.rank}
+                    </TableCell>
 
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarImage src={student.avatarUrl} />
-                        <AvatarFallback>
-                          {getInitials(
-                            student.displayName ||
-                              student.username ||
-                              ""
-                          )}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-semibold">
-                          {canSeeFullName
-                            ? student.displayName || student.username
-                            : student.username}
-                        </p>
-                        {canSeeFullName && (
-                          <p className="text-xs text-muted-foreground">
-                            {student.gradeLevel}
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar>
+                          <AvatarImage src={student.avatarUrl} />
+                          <AvatarFallback>
+                            {getInitials(
+                              student.displayName ||
+                                student.username ||
+                                ""
+                            )}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold">
+                            {canSeeFullName
+                              ? student.displayName || student.username
+                              : student.username}
                           </p>
-                        )}
+                          {canSeeFullName && (
+                            <p className="text-xs text-muted-foreground">
+                              {student.gradeLevel}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </TableCell>
+                    </TableCell>
 
-                  <TableCell className="text-center">
-                    <div className="space-y-1">
-                      <p className="font-bold">
-                        {student.overallProgress}%
-                      </p>
-                      <Progress
-                        value={student.overallProgress}
-                        className="h-2"
-                      />
-                    </div>
-                  </TableCell>
+                    <TableCell className="text-center">
+                      <div className="space-y-1">
+                        <p className="font-bold">
+                          {student.overallProgress}%
+                        </p>
+                        <Progress
+                          value={student.overallProgress}
+                          className="h-2"
+                        />
+                      </div>
+                    </TableCell>
 
-                  <TableCell className="text-center">
-                    <Badge>{student.masteryLevel}</Badge>
-                  </TableCell>
-                </TableRow>
+                    <TableCell className="text-center">
+                      <Badge>{student.masteryLevel}</Badge>
+                    </TableCell>
+                  </TableRow>  {/* Fixed: Closed <TableRow> */}
                 ))
               ) : (
                 <TableRow>
