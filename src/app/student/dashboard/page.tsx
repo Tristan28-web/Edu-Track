@@ -121,9 +121,20 @@ export default function StudentDashboardPage() {
   const handleSelectQuiz = async (quiz: CourseContentItem) => {
     try {
       // Prevent opening a quiz whose due date has already passed
-      if (quiz.dueDate && quiz.dueDate.toDate().getTime() <= Date.now()) {
-        setError("This quiz is no longer available (past its due date).");
-        return;
+      if (quiz.dueDate) {
+        const dueDate = quiz.dueDate.toDate();
+        const now = new Date();
+        if (dueDate.getTime() <= now.getTime()) {
+          // Format the date for display
+          const formattedDate = dueDate.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          });
+          setError(`This quiz is no longer available. It was due on ${formattedDate}. Please contact your teacher if you need an extension.`);
+          return;
+        }
       }
 
       // Ensure we have the full quiz content. Some newly created quizzes
@@ -302,7 +313,7 @@ export default function StudentDashboardPage() {
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{item.title}</TableCell>
                         <TableCell className="hidden md:table-cell">{getTopicTitle(item.topic)}</TableCell>
-                        <TableCell className="hidden sm:table-cell text-xs">{item.createdAt ? formatDistanceToNowStrict(item.createdAt.toDate(), { addSuffix: true }) : 'N/A'}</TableCell>
+                        <TableCell className="hidden sm:table-cell text-sm">{item.createdAt ? formatDistanceToNowStrict(item.createdAt.toDate(), { addSuffix: true }) : 'N/A'}</TableCell>
                         <TableCell className="text-right">
                           <Button onClick={() => handleSelectQuiz(item)} size="sm">
                             <PlayCircle className="mr-2 h-4 w-4" />
@@ -419,4 +430,4 @@ export default function StudentDashboardPage() {
       </Dialog>
     </div>
   );
-}                            
+}
