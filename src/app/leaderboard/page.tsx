@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import type { AppUser, QuizResult, CourseContentItem } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, AlertTriangle, Trophy, Star, BookOpen } from "lucide-react";
+import { Loader2, AlertTriangle, Trophy, Star, BookOpen, Target } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getInitials } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FeedbackColumn } from "@/components/leaderboard/FeedbackColumn";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 
 interface RankedStudent extends AppUser {
   rank: number;
@@ -50,13 +51,11 @@ export default function LeaderboardPage() {
   useEffect(() => {
     setIsLoading(true);
     
-    // Fetch all students
     const studentsQuery = query(
       collection(db, "users"),
       where("role", "==", "student")
     );
     
-    // Fetch all quiz results
     const resultsQuery = query(collection(db, "quizResults"));
     
     let sectionsQuery;
@@ -66,7 +65,6 @@ export default function LeaderboardPage() {
       sectionsQuery = query(collection(db, "sections"), orderBy("name"));
     }
 
-    // Fetch topics from course content
     const topicsQuery = query(
       collection(db, "courseContent")
     );
@@ -111,7 +109,6 @@ export default function LeaderboardPage() {
         }
       });
       
-      // Sort topics alphabetically
       topicsData.sort((a, b) => a.topic.localeCompare(b.topic));
       setTeacherTopics(topicsData);
     }, (err) => {
@@ -148,45 +145,38 @@ export default function LeaderboardPage() {
   };
 
   const rankedStudents = useMemo(() => {
-    console.log("Calculating ranked students...");
-    console.log("All students:", allStudents.length);
-    console.log("Quiz results:", quizResults.length);
-    console.log("Filters:", { gradeFilter, topicFilter, sectionFilter });
-    
     let filteredStudents = [...allStudents];
 
     // Apply grade filter
     if (gradeFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.gradeLevel === gradeFilter);
-        console.log("After grade filter:", filteredStudents.length);
     }
 
     // Apply section filter
     if ((role === 'principal' || role === 'admin' || role === 'teacher') && sectionFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.sectionId === sectionFilter);
-        console.log("After section filter:", filteredStudents.length);
     }
     
     // Apply teacher filter
     if (role === 'teacher' && currentUser) {
       filteredStudents = filteredStudents.filter(s => s.teacherId === currentUser.id);
-      console.log("After teacher filter:", filteredStudents.length);
     }
 
     const studentScores = filteredStudents.map(student => {
         // Get ALL quiz results for this student
         const allStudentResults = quizResults.filter(r => r.studentId === student.id);
         
+        // FILTER OUT QUIZZES WITH 0% SCORE OR 0 CORRECT ANSWERS
+        const validResults = allStudentResults.filter(r => {
+          // Check if quiz has a valid score (greater than 0%)
+          const percentage = (r.score || 0) / (r.total || 1) * 100;
+          return percentage > 0;
+        });
+        
         // If topic filter is not "all", filter by topic
         const relevantResults = topicFilter === "all" 
-          ? allStudentResults 
-          : allStudentResults.filter(r => r.topic === topicFilter);
-        
-        console.log(`Student ${student.displayName || student.username}:`, {
-          allResults: allStudentResults.length,
-          relevantResults: relevantResults.length,
-          topicFilter
-        });
+          ? validResults  // Use validResults instead of allStudentResults
+          : validResults.filter(r => r.topic === topicFilter);
         
         let score = 0;
         let quizCount = relevantResults.length;
@@ -201,7 +191,7 @@ export default function LeaderboardPage() {
           ...student, 
           score, 
           quizCount,
-          hasTakenQuizzes: allStudentResults.length > 0
+          totalQuizzes: allStudentResults.length, // Total including 0% ones
         };
     });
 
@@ -245,7 +235,11 @@ export default function LeaderboardPage() {
             <Trophy className="h-8 w-8" /> Leaderboard
           </CardTitle>
           <CardDescription>
-            See how you rank against other students based on overall quiz performance.
+            See how you rank against other students based on quiz performance. 
+            <span className="block text-sm text-muted-foreground mt-1">
+              <Target className="inline h-3 w-3 mr-1" />
+              Note: Quizzes with 0% score are excluded from calculations.
+            </span>
           </CardDescription>
         </CardHeader>
       </Card>
@@ -256,6 +250,13 @@ export default function LeaderboardPage() {
                  <CardTitle className="text-xl text-primary/90 flex items-center gap-2">
                     <Star className="h-6 w-6"/> Your Rank
                  </CardTitle>
+                 <CardDescription>
+                   {currentUserRanking.totalQuizzes > currentUserRanking.quizCount ? (
+                     <span className="text-sm">
+                       {currentUserRanking.totalQuizzes - currentUserRanking.quizCount} quiz(zes) excluded (0% score)
+                     </span>
+                   ) : null}
+                 </CardDescription>
             </CardHeader>
             <CardContent>
                  <Table>
@@ -272,15 +273,23 @@ export default function LeaderboardPage() {
                         <TableRow className="bg-transparent hover:bg-primary/20">
                             <TableCell className="text-center font-bold text-2xl">{currentUserRanking.rank}</TableCell>
                             <TableCell className="font-semibold">{currentUserRanking.displayName}</TableCell>
-                            <TableCell className="text-center font-bold text-lg">
-                              {currentUserRanking.score}%
+                            <TableCell className="text-center">
+                              <div className="font-bold text-lg">{currentUserRanking.score}%</div>
                               {currentUserRanking.quizCount > 0 && (
-                                <span className="text-xs text-muted-foreground block">
-                                  ({currentUserRanking.quizCount} quiz{currentUserRanking.quizCount !== 1 ? 'zes' : ''})
-                                </span>
+                                <div className="text-xs text-muted-foreground">
+                                  Based on {currentUserRanking.quizCount} valid quiz{currentUserRanking.quizCount !== 1 ? 'zes' : ''}
+                                </div>
                               )}
                             </TableCell>
-                            <TableCell className="text-center font-semibold">{currentUserRanking.masteryLevel}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant={
+                                currentUserRanking.masteryLevel === 'Expert' ? 'default' :
+                                currentUserRanking.masteryLevel === 'Advanced' ? 'secondary' :
+                                currentUserRanking.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
+                              }>
+                                {currentUserRanking.masteryLevel}
+                              </Badge>
+                            </TableCell>
                             <TableCell><FeedbackColumn score={currentUserRanking.score} /></TableCell>
                         </TableRow>
                     </TableBody>
@@ -348,23 +357,12 @@ export default function LeaderboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Class Rankings</CardTitle>
-              <CardDescription className="flex items-center gap-2">
-                {topicFilter !== "all" && (
-                  <Badge variant="secondary">
-                    Topic: {topicFilter}
-                  </Badge>
-                )}
-                {gradeFilter !== "all" && (
-                  <Badge variant="secondary">
-                    Grade: {gradeFilter}
-                  </Badge>
-                )}
-                {sectionFilter !== "all" && sections.find(s => s.id === sectionFilter) && (
-                  <Badge variant="secondary">
-                    Section: {sections.find(s => s.id === sectionFilter)?.name}
-                  </Badge>
-                )}
-              </CardDescription>
+              <div className="flex items-center gap-4">
+                <div className="text-sm text-muted-foreground">
+                  {rankedStudents.length} student{rankedStudents.length !== 1 ? 's' : ''} showing
+                  {topicFilter !== "all" && ` for topic "${topicFilter}"`}
+                </div>
+              </div>
               <div className="flex flex-col sm:flex-row gap-4">
                   <Select value={gradeFilter} onValueChange={setGradeFilter}>
                       <SelectTrigger className="w-full sm:w-[180px]">
@@ -401,9 +399,9 @@ export default function LeaderboardPage() {
                       <TableHead className="w-16 text-center">Rank</TableHead>
                       <TableHead>Student</TableHead>
                       <TableHead className="text-center">Score</TableHead>
-                      <TableHead className="text-center hidden md:table-cell">Quizzes</TableHead>
+                      <TableHead className="text-center hidden md:table-cell">Valid Quizzes</TableHead>
                       <TableHead className="text-center hidden md:table-cell">Mastery</TableHead>
-                      <TableHead className="hidden lg:table-cell">Feedback</TableHead>
+                      <TableHead className="hidden lg:table-cell">Progress</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -437,12 +435,20 @@ export default function LeaderboardPage() {
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="font-bold text-lg">{student.score}%</div>
-                            {student.quizCount === 0 && topicFilter !== "all" && (
-                              <div className="text-xs text-muted-foreground">No quizzes on this topic</div>
+                            {student.quizCount > 0 ? (
+                              <div className="text-xs text-muted-foreground">
+                                {student.quizCount} valid quiz{student.quizCount !== 1 ? 'zes' : ''}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-muted-foreground">
+                                No valid quizzes
+                              </div>
                             )}
                           </TableCell>
                           <TableCell className="text-center hidden md:table-cell">
-                            {student.quizCount}
+                            <Badge variant={student.quizCount > 0 ? "outline" : "secondary"}>
+                              {student.quizCount}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-center hidden md:table-cell">
                             <Badge variant={
@@ -454,7 +460,10 @@ export default function LeaderboardPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="hidden lg:table-cell">
-                            <FeedbackColumn score={student.score} />
+                            <div className="space-y-1">
+                              <Progress value={student.score} className="h-2" />
+                              <FeedbackColumn score={student.score} compact />
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
