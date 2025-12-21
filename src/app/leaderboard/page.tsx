@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { AppUser, QuizResult, CourseContentItem } from "@/types";
+import type { AppUser } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Loader2, AlertTriangle, Trophy, BookOpen, Target } from "lucide-react";
@@ -36,7 +36,6 @@ interface TopicProgressData {
 export default function LeaderboardPage() {
   const { user: currentUser, role } = useAuth();
   const [allStudents, setAllStudents] = useState<AppUser[]>([]);
-  const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +50,6 @@ export default function LeaderboardPage() {
       collection(db, "users"),
       where("role", "==", "student")
     );
-    
-    const resultsQuery = query(collection(db, "quizResults"));
     
     let sectionsQuery;
     if (role === 'teacher' && currentUser) {
@@ -71,18 +68,6 @@ export default function LeaderboardPage() {
       setError("Failed to load student data.");
     });
     unsubscribes.push(unsubscribeStudents);
-    
-    const unsubscribeResults = onSnapshot(resultsQuery, (snapshot) => {
-        const results = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        } as QuizResult));
-        setQuizResults(results);
-    }, (err) => {
-        console.error("Error fetching quiz results:", err);
-        setError("Failed to load quiz results data.");
-    });
-    unsubscribes.push(unsubscribeResults);
     
     if (sectionsQuery) {
         const unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
@@ -120,47 +105,29 @@ export default function LeaderboardPage() {
     return null;
   };
 
-  // Calculate student progress - EXACT SAME as My Progress page
+  // Calculate student progress - USING EXACT SAME PROGRESS.MASTERY VALUES AS MY PROGRESS PAGE
   const calculateStudentProgress = (student: AppUser) => {
-    // Get student's quiz results
-    const studentQuizResults = quizResults.filter(r => r.studentId === student.id);
-    
-    // Get student's progress data
+    // Get student's progress data - EXACT SAME DATA AS MY PROGRESS PAGE
     const firestoreProgress = student.progress || {};
     
-    // Convert progress data to array format (same as My Progress page)
+    // Convert progress data to array format (EXACT SAME as My Progress page)
     const topicsProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
       const topicData = data as TopicProgressData;
-      const quizzesAttempted = topicData.quizzesAttempted || 0;
-      let mastery = topicData.mastery || 0;
-      
-      // If we have quiz results for this topic, calculate mastery from actual scores
-      const topicResults = studentQuizResults.filter(q => q.topic === topicKey);
-      if (topicResults.length > 0) {
-        const topicPointsEarned = topicResults.reduce((sum, quiz) => {
-          const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
-          return sum + raw;
-        }, 0);
-        const topicPointsPossible = topicResults.reduce((sum, quiz) => {
-          const rawTotal = (quiz as any).total ?? 0;
-          return sum + rawTotal;
-        }, 0);
-
-        mastery = topicPointsPossible > 0 ? Math.round((topicPointsEarned / topicPointsPossible) * 100) : 0;
-      }
+      // USE THE EXACT mastery VALUE FROM USER.PROGRESS (same as My Progress page)
+      const mastery = topicData.mastery || 0;
       
       return {
         topic: topicKey,
         mastery,
-        quizzesAttempted,
       };
     });
     
-    // CALCULATE OVERALL PROGRESS - EXACT SAME AS MY PROGRESS PAGE
+    // CALCULATE OVERALL PROGRESS - EXACT SAME FORMULA AS MY PROGRESS PAGE
     let overallProgress = 0;
     const totalTopics = topicsProgress.length;
     
     if (totalTopics > 0) {
+      // Sum all mastery values and divide by number of topics
       const totalMastery = topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0);
       overallProgress = Math.round(totalMastery / totalTopics);
     }
@@ -188,9 +155,18 @@ export default function LeaderboardPage() {
       filteredStudents = filteredStudents.filter(s => s.teacherId === currentUser.id);
     }
 
-    // Calculate progress for each student
+    // Calculate progress for each student USING EXACT SAME PROGRESS DATA
     const studentScores = filteredStudents.map(student => {
       const progress = calculateStudentProgress(student);
+      
+      console.log("Student progress calculation:", {
+        name: student.displayName,
+        overallProgress: progress.overallProgress,
+        progressData: student.progress ? Object.entries(student.progress).map(([key, data]) => ({
+          topic: key,
+          mastery: (data as TopicProgressData).mastery
+        })) : []
+      });
       
       return { 
         ...student, 
@@ -210,7 +186,7 @@ export default function LeaderboardPage() {
         ...student,
         rank: index + 1,
     }));
-  }, [allStudents, quizResults, gradeFilter, role, sectionFilter, currentUser]);
+  }, [allStudents, gradeFilter, role, sectionFilter, currentUser]);
 
   const canSeeFullName = role === 'admin' || role === 'teacher' || role === 'principal';
 
@@ -222,10 +198,10 @@ export default function LeaderboardPage() {
             <Trophy className="h-8 w-8" /> Progress Leaderboard
           </CardTitle>
           <CardDescription>
-            Rankings based on overall progress calculation (same as My Progress page).
+            Rankings based on the exact same overall progress calculation as My Progress page.
             <span className="block text-sm text-muted-foreground mt-1">
               <Target className="inline h-3 w-3 mr-1" />
-              Overall Completion = Average of all topic mastery scores
+              Using stored mastery values from user progress data (Geometry: 60%, Algebra: 43% → 52% overall)
             </span>
           </CardDescription>
         </CardHeader>
@@ -295,44 +271,61 @@ export default function LeaderboardPage() {
                 </TableHeader>
                 <TableBody>
                   {rankedStudents.length > 0 ? (
-                    rankedStudents.map((student) => (
-                      <TableRow key={student.id} className={student.id === currentUser?.id ? "bg-primary/5" : "hover:bg-muted/50"}>
-                        <TableCell className="text-center font-bold text-lg">
-                          <div className="flex items-center justify-center">
-                            {getRankMedal(student.rank) || student.rank}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar>
-                              <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
-                              <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
-                              {canSeeFullName && student.gradeLevel && (
-                                <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
+                    rankedStudents.map((student) => {
+                      // Find current user's progress for debugging
+                      const isCurrentUser = student.id === currentUser?.id;
+                      
+                      return (
+                        <TableRow key={student.id} className={isCurrentUser ? "bg-primary/5" : "hover:bg-muted/50"}>
+                          <TableCell className="text-center font-bold text-lg">
+                            <div className="flex items-center justify-center">
+                              {getRankMedal(student.rank) || student.rank}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar>
+                                <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
+                                <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
+                                {canSeeFullName && student.gradeLevel && (
+                                  <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
+                                )}
+                                {isCurrentUser && student.progress && (
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    Topics: {Object.keys(student.progress).join(", ")}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="space-y-1">
+                              <div className="font-bold text-lg">{student.overallProgress}%</div>
+                              <Progress value={student.overallProgress} className="h-2" />
+                              {isCurrentUser && student.progress && (
+                                <div className="text-xs text-muted-foreground">
+                                  ({Object.entries(student.progress).map(([key, data]) => 
+                                    `${key}: ${(data as TopicProgressData).mastery}%`
+                                  ).join(", ")})
+                                </div>
                               )}
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <div className="space-y-1">
-                            <div className="font-bold text-lg">{student.overallProgress}%</div>
-                            <Progress value={student.overallProgress} className="h-2" />
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant={
-                            student.masteryLevel === 'Expert' ? 'default' :
-                            student.masteryLevel === 'Advanced' ? 'secondary' :
-                            student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
-                          }>
-                            {student.masteryLevel}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant={
+                              student.masteryLevel === 'Expert' ? 'default' :
+                              student.masteryLevel === 'Advanced' ? 'secondary' :
+                              student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
+                            }>
+                              {student.masteryLevel}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center h-32">
