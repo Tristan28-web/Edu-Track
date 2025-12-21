@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 interface RankedStudent extends AppUser {
   rank: number;
   score: number;
+  quizCount: number;
   masteryLevel: 'Beginner' | 'Proficient' | 'Advanced' | 'Expert';
 }
 
@@ -48,13 +49,14 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     setIsLoading(true);
+    
+    // Fetch all students
     const studentsQuery = query(
       collection(db, "users"),
-      where("role", "==", "student"),
-      orderBy("totalPoints", "desc")
+      where("role", "==", "student")
     );
     
-    // Real-time listener for all quiz results (for all users)
+    // Fetch all quiz results
     const resultsQuery = query(collection(db, "quizResults"));
     
     let sectionsQuery;
@@ -64,63 +66,50 @@ export default function LeaderboardPage() {
       sectionsQuery = query(collection(db, "sections"), orderBy("name"));
     }
 
-    // Real-time listener for course content to get teacher topics
+    // Fetch topics from course content
     const topicsQuery = query(
-      collection(db, "courseContent"),
-      where("contentType", "in", ["quiz", "lessonMaterial"])
+      collection(db, "courseContent")
     );
 
+    const unsubscribes: Array<() => void> = [];
+
     const unsubscribeStudents = onSnapshot(studentsQuery, (snapshot) => {
-      setAllStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
+      const students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
+      setAllStudents(students);
     }, (err) => {
       console.error("Error fetching students:", err);
       setError("Failed to load student data.");
     });
+    unsubscribes.push(unsubscribeStudents);
     
     const unsubscribeResults = onSnapshot(resultsQuery, (snapshot) => {
-        setQuizResults(snapshot.docs.map(doc => ({ 
+        const results = snapshot.docs.map(doc => ({ 
           id: doc.id, 
           ...doc.data() 
-        } as QuizResult)));
+        } as QuizResult));
+        setQuizResults(results);
     }, (err) => {
         console.error("Error fetching quiz results:", err);
         setError("Failed to load quiz results data.");
     });
+    unsubscribes.push(unsubscribeResults);
     
-    const unsubscribeTopics = onSnapshot(topicsQuery, async (snapshot) => {
+    const unsubscribeTopics = onSnapshot(topicsQuery, (snapshot) => {
       const topicsData: TeacherTopic[] = [];
       const uniqueTopics = new Set<string>();
       
-      for (const doc of snapshot.docs) {
+      snapshot.docs.forEach(doc => {
         const content = doc.data() as CourseContentItem;
-        if (content.topic) {
-          // Add topic if it's not already in the set
-          if (!uniqueTopics.has(content.topic)) {
-            uniqueTopics.add(content.topic);
-            
-            // Get teacher info for each topic
-            let teacherName = "Unknown Teacher";
-            if (content.teacherId) {
-              try {
-                const teacherDoc = await getDoc(doc(db, "users", content.teacherId));
-                if (teacherDoc.exists()) {
-                  const teacherData = teacherDoc.data() as AppUser;
-                  teacherName = teacherData.displayName || teacherData.username || "Unknown Teacher";
-                }
-              } catch (err) {
-                console.error("Error fetching teacher data:", err);
-              }
-            }
-            
-            topicsData.push({
-              id: doc.id,
-              topic: content.topic,
-              teacherId: content.teacherId || "",
-              teacherName
-            });
-          }
+        if (content.topic && !uniqueTopics.has(content.topic)) {
+          uniqueTopics.add(content.topic);
+          topicsData.push({
+            id: doc.id,
+            topic: content.topic,
+            teacherId: content.teacherId || "",
+            teacherName: "Teacher"
+          });
         }
-      }
+      });
       
       // Sort topics alphabetically
       topicsData.sort((a, b) => a.topic.localeCompare(b.topic));
@@ -128,29 +117,26 @@ export default function LeaderboardPage() {
     }, (err) => {
       console.error("Error fetching topics:", err);
     });
+    unsubscribes.push(unsubscribeTopics);
     
-    let unsubscribeSections = () => {};
     if (sectionsQuery) {
-        unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
+        const unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
             setSections(snapshot.docs.map(doc => ({ 
               id: doc.id, 
               name: doc.data().name 
             })));
-            setIsLoading(false);
         }, (err) => {
             console.error("Error fetching sections:", err);
             setError("Failed to load sections data.");
-            setIsLoading(false);
         });
-    } else {
-      setIsLoading(false);
+        unsubscribes.push(unsubscribeSections);
     }
+    
+    // Set loading to false after initial load
+    setTimeout(() => setIsLoading(false), 1000);
 
     return () => {
-        unsubscribeStudents();
-        unsubscribeResults();
-        unsubscribeTopics();
-        unsubscribeSections();
+        unsubscribes.forEach(unsubscribe => unsubscribe());
     };
   }, [role, currentUser]);
   
@@ -162,45 +148,75 @@ export default function LeaderboardPage() {
   };
 
   const rankedStudents = useMemo(() => {
-    let filteredStudents = allStudents;
+    console.log("Calculating ranked students...");
+    console.log("All students:", allStudents.length);
+    console.log("Quiz results:", quizResults.length);
+    console.log("Filters:", { gradeFilter, topicFilter, sectionFilter });
+    
+    let filteredStudents = [...allStudents];
 
+    // Apply grade filter
     if (gradeFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.gradeLevel === gradeFilter);
+        console.log("After grade filter:", filteredStudents.length);
     }
 
+    // Apply section filter
     if ((role === 'principal' || role === 'admin' || role === 'teacher') && sectionFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.sectionId === sectionFilter);
+        console.log("After section filter:", filteredStudents.length);
     }
     
-    // Only filter by teacher if role is teacher
+    // Apply teacher filter
     if (role === 'teacher' && currentUser) {
       filteredStudents = filteredStudents.filter(s => s.teacherId === currentUser.id);
+      console.log("After teacher filter:", filteredStudents.length);
     }
 
     const studentScores = filteredStudents.map(student => {
-        const relevantResults = quizResults.filter(r => 
-            r.studentId === student.id &&
-            (topicFilter === "all" || r.topic === topicFilter)
-        );
+        // Get ALL quiz results for this student
+        const allStudentResults = quizResults.filter(r => r.studentId === student.id);
         
-        if(relevantResults.length === 0) {
-            return { ...student, score: 0 };
+        // If topic filter is not "all", filter by topic
+        const relevantResults = topicFilter === "all" 
+          ? allStudentResults 
+          : allStudentResults.filter(r => r.topic === topicFilter);
+        
+        console.log(`Student ${student.displayName || student.username}:`, {
+          allResults: allStudentResults.length,
+          relevantResults: relevantResults.length,
+          topicFilter
+        });
+        
+        let score = 0;
+        let quizCount = relevantResults.length;
+        
+        if (relevantResults.length > 0) {
+            const totalScore = relevantResults.reduce((acc, r) => acc + (r.score || 0), 0);
+            const totalPossible = relevantResults.reduce((acc, r) => acc + (r.total || 1), 0);
+            score = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
         }
         
-        const totalScore = relevantResults.reduce((acc, r) => acc + r.score, 0);
-        const totalPossible = relevantResults.reduce((acc, r) => acc + r.total, 0);
-        const averageScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
-        
-        return { ...student, score: averageScore };
+        return { 
+          ...student, 
+          score, 
+          quizCount,
+          hasTakenQuizzes: allStudentResults.length > 0
+        };
     });
 
-    return studentScores
-      .sort((a, b) => b.score - a.score)
-      .map((student, index) => ({
+    // Sort by score descending, then by name for tie-breaking
+    const sortedStudents = studentScores.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (a.displayName || a.username || "").localeCompare(b.displayName || b.username || "");
+    });
+
+    // Assign ranks
+    return sortedStudents.map((student, index) => ({
         ...student,
         rank: index + 1,
         masteryLevel: getMasteryLevel(student.score),
-      }));
+    }));
   }, [allStudents, quizResults, gradeFilter, topicFilter, role, sectionFilter, currentUser]);
   
   const currentUserRanking = useMemo(() => {
@@ -209,15 +225,14 @@ export default function LeaderboardPage() {
 
   const canSeeFullName = role === 'admin' || role === 'teacher' || role === 'principal';
 
-  // Helper function to get a color based on topic index
   const getTopicColor = (index: number) => {
     const colors = [
-      "bg-blue-100 text-blue-800 border-blue-200",
-      "bg-green-100 text-green-800 border-green-200",
-      "bg-purple-100 text-purple-800 border-purple-200",
-      "bg-amber-100 text-amber-800 border-amber-200",
-      "bg-pink-100 text-pink-800 border-pink-200",
-      "bg-indigo-100 text-indigo-800 border-indigo-200",
+      "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200",
+      "bg-green-100 text-green-800 border-green-200 hover:bg-green-200",
+      "bg-purple-100 text-purple-800 border-purple-200 hover:bg-purple-200",
+      "bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200",
+      "bg-pink-100 text-pink-800 border-pink-200 hover:bg-pink-200",
+      "bg-indigo-100 text-indigo-800 border-indigo-200 hover:bg-indigo-200",
     ];
     return colors[index % colors.length];
   };
@@ -257,7 +272,14 @@ export default function LeaderboardPage() {
                         <TableRow className="bg-transparent hover:bg-primary/20">
                             <TableCell className="text-center font-bold text-2xl">{currentUserRanking.rank}</TableCell>
                             <TableCell className="font-semibold">{currentUserRanking.displayName}</TableCell>
-                            <TableCell className="text-center font-bold text-lg">{currentUserRanking.score}%</TableCell>
+                            <TableCell className="text-center font-bold text-lg">
+                              {currentUserRanking.score}%
+                              {currentUserRanking.quizCount > 0 && (
+                                <span className="text-xs text-muted-foreground block">
+                                  ({currentUserRanking.quizCount} quiz{currentUserRanking.quizCount !== 1 ? 'zes' : ''})
+                                </span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-center font-semibold">{currentUserRanking.masteryLevel}</TableCell>
                             <TableCell><FeedbackColumn score={currentUserRanking.score} /></TableCell>
                         </TableRow>
@@ -270,6 +292,7 @@ export default function LeaderboardPage() {
       {isLoading && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <span className="ml-3 text-muted-foreground">Loading leaderboard...</span>
         </div>
       )}
 
@@ -284,18 +307,20 @@ export default function LeaderboardPage() {
       {!isLoading && !error && (
         <>
           {/* Topics Display Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BookOpen className="h-5 w-5" />
-                Available Topics
-              </CardTitle>
-              <CardDescription>
-                Topics created by teachers. Select a topic to filter leaderboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {teacherTopics.length > 0 ? (
+          {teacherTopics.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BookOpen className="h-5 w-5" />
+                  Filter by Topic
+                </CardTitle>
+                <CardDescription>
+                  {topicFilter === "all" 
+                    ? "Showing all topics" 
+                    : `Showing results for: ${topicFilter}`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
                 <div className="flex flex-wrap gap-2">
                   <Badge 
                     variant={topicFilter === "all" ? "default" : "outline"}
@@ -308,23 +333,38 @@ export default function LeaderboardPage() {
                     <Badge 
                       key={topicItem.id}
                       variant={topicFilter === topicItem.topic ? "default" : "outline"}
-                      className={`cursor-pointer hover:opacity-80 transition-all ${topicFilter === topicItem.topic ? '' : getTopicColor(index)}`}
+                      className={`cursor-pointer transition-all ${topicFilter === topicItem.topic ? '' : getTopicColor(index)}`}
                       onClick={() => setTopicFilter(topicItem.topic)}
                     >
                       {topicItem.topic}
                     </Badge>
                   ))}
                 </div>
-              ) : (
-                <p className="text-muted-foreground">No topics available yet. Teachers need to create content first.</p>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Leaderboard Section */}
           <Card>
             <CardHeader>
               <CardTitle>Class Rankings</CardTitle>
+              <CardDescription className="flex items-center gap-2">
+                {topicFilter !== "all" && (
+                  <Badge variant="secondary">
+                    Topic: {topicFilter}
+                  </Badge>
+                )}
+                {gradeFilter !== "all" && (
+                  <Badge variant="secondary">
+                    Grade: {gradeFilter}
+                  </Badge>
+                )}
+                {sectionFilter !== "all" && sections.find(s => s.id === sectionFilter) && (
+                  <Badge variant="secondary">
+                    Section: {sections.find(s => s.id === sectionFilter)?.name}
+                  </Badge>
+                )}
+              </CardDescription>
               <div className="flex flex-col sm:flex-row gap-4">
                   <Select value={gradeFilter} onValueChange={setGradeFilter}>
                       <SelectTrigger className="w-full sm:w-[180px]">
@@ -361,6 +401,7 @@ export default function LeaderboardPage() {
                       <TableHead className="w-16 text-center">Rank</TableHead>
                       <TableHead>Student</TableHead>
                       <TableHead className="text-center">Score</TableHead>
+                      <TableHead className="text-center hidden md:table-cell">Quizzes</TableHead>
                       <TableHead className="text-center hidden md:table-cell">Mastery</TableHead>
                       <TableHead className="hidden lg:table-cell">Feedback</TableHead>
                     </TableRow>
@@ -368,23 +409,41 @@ export default function LeaderboardPage() {
                   <TableBody>
                     {rankedStudents.length > 0 ? (
                       rankedStudents.map((student) => (
-                        <TableRow key={student.id} className={student.id === currentUser?.id ? "hidden" : ""}>
-                          <TableCell className="text-center font-bold text-lg">{student.rank}</TableCell>
+                        <TableRow key={student.id} className={student.id === currentUser?.id ? "bg-primary/5" : "hover:bg-muted/50"}>
+                          <TableCell className="text-center font-bold text-lg">
+                            <div className="flex items-center justify-center">
+                              {student.rank <= 3 ? (
+                                <span className="text-2xl">
+                                  {student.rank === 1 ? "🥇" : student.rank === 2 ? "🥈" : "🥉"}
+                                </span>
+                              ) : (
+                                <span>{student.rank}</span>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <Avatar>
                                 <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
-                                <AvatarFallback>{getInitials(student.displayName || "")}</AvatarFallback>
+                                <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
                               </Avatar>
                               <div>
-                                <p className="font-semibold">{canSeeFullName ? student.displayName : student.username}</p>
+                                <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
                                 {canSeeFullName && student.gradeLevel && (
                                   <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
                                 )}
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-center font-bold text-lg">{student.score}%</TableCell>
+                          <TableCell className="text-center">
+                            <div className="font-bold text-lg">{student.score}%</div>
+                            {student.quizCount === 0 && topicFilter !== "all" && (
+                              <div className="text-xs text-muted-foreground">No quizzes on this topic</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center hidden md:table-cell">
+                            {student.quizCount}
+                          </TableCell>
                           <TableCell className="text-center hidden md:table-cell">
                             <Badge variant={
                               student.masteryLevel === 'Expert' ? 'default' :
@@ -394,13 +453,21 @@ export default function LeaderboardPage() {
                               {student.masteryLevel}
                             </Badge>
                           </TableCell>
-                          <TableCell className="hidden lg:table-cell"><FeedbackColumn score={student.score} /></TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <FeedbackColumn score={student.score} />
+                          </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center h-24">
-                          No students found matching the filters.
+                        <TableCell colSpan={6} className="text-center h-32">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <BookOpen className="h-8 w-8 text-muted-foreground" />
+                            <p className="text-muted-foreground">No students found matching the filters</p>
+                            <p className="text-sm text-muted-foreground">
+                              Try changing grade, section, or topic filters
+                            </p>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
