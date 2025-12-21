@@ -1,23 +1,22 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { collection, query, where, orderBy, onSnapshot, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { AppUser, QuizResult, CourseContentItem } from "@/types";
+import type { AppUser, QuizResult } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, AlertTriangle, Trophy, Star, BookOpen, BarChart3 } from "lucide-react";
+import { Loader2, AlertTriangle, Trophy, Star } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getInitials } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { FeedbackColumn } from "@/components/leaderboard/FeedbackColumn";
 
 interface RankedStudent extends AppUser {
   rank: number;
-  overallProgress: number;
+  score: number;
   masteryLevel: 'Beginner' | 'Proficient' | 'Advanced' | 'Expert';
 }
 
@@ -26,26 +25,11 @@ interface Section {
     name: string;
 }
 
-interface TeacherTopic {
-  id: string;
-  topic: string;
-  teacherId: string;
-  teacherName?: string;
-}
-
-interface TopicProgressData {
-  mastery: number;
-  status: string;
-  quizzesAttempted: number;
-  [key: string]: any;
-}
-
 export default function LeaderboardPage() {
   const { user: currentUser, role } = useAuth();
   const [allStudents, setAllStudents] = useState<AppUser[]>([]);
   const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
-  const [teacherTopics, setTeacherTopics] = useState<TeacherTopic[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,12 +38,11 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     setIsLoading(true);
-    
     const studentsQuery = query(
       collection(db, "users"),
-      where("role", "==", "student")
+      where("role", "==", "student"),
+      orderBy("totalPoints", "desc")
     );
-    
     const resultsQuery = query(collection(db, "quizResults"));
     
     let sectionsQuery;
@@ -69,182 +52,90 @@ export default function LeaderboardPage() {
       sectionsQuery = query(collection(db, "sections"), orderBy("name"));
     }
 
-    const topicsQuery = query(collection(db, "courseContent"));
-
-    const unsubscribes: Array<() => void> = [];
-
     const unsubscribeStudents = onSnapshot(studentsQuery, (snapshot) => {
-      const students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
-      setAllStudents(students);
+      setAllStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
     }, (err) => {
       console.error("Error fetching students:", err);
       setError("Failed to load student data.");
     });
-    unsubscribes.push(unsubscribeStudents);
     
     const unsubscribeResults = onSnapshot(resultsQuery, (snapshot) => {
-        const results = snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        } as QuizResult));
-        setQuizResults(results);
+        setQuizResults(snapshot.docs.map(doc => doc.data() as QuizResult));
+        if (role !== 'principal' && role !== 'admin' && role !== 'teacher') setIsLoading(false);
     }, (err) => {
         console.error("Error fetching quiz results:", err);
         setError("Failed to load quiz results data.");
+        setIsLoading(false);
     });
-    unsubscribes.push(unsubscribeResults);
     
-    const unsubscribeTopics = onSnapshot(topicsQuery, (snapshot) => {
-      const topicsData: TeacherTopic[] = [];
-      const uniqueTopics = new Set<string>();
-      
-      snapshot.docs.forEach(doc => {
-        const content = doc.data() as CourseContentItem;
-        if (content.topic && !uniqueTopics.has(content.topic)) {
-          uniqueTopics.add(content.topic);
-          topicsData.push({
-            id: doc.id,
-            topic: content.topic,
-            teacherId: content.teacherId || "",
-            teacherName: "Teacher"
-          });
-        }
-      });
-      
-      topicsData.sort((a, b) => a.topic.localeCompare(b.topic));
-      setTeacherTopics(topicsData);
-    }, (err) => {
-      console.error("Error fetching topics:", err);
-    });
-    unsubscribes.push(unsubscribeTopics);
-    
+    let unsubscribeSections = () => {};
     if (sectionsQuery) {
-        const unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
-            setSections(snapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              name: doc.data().name 
-            })));
+        unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
+            setSections(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })));
+            setIsLoading(false);
         }, (err) => {
             console.error("Error fetching sections:", err);
             setError("Failed to load sections data.");
+            setIsLoading(false);
         });
-        unsubscribes.push(unsubscribeSections);
     }
-    
-    setTimeout(() => setIsLoading(false), 1000);
+
 
     return () => {
-        unsubscribes.forEach(unsubscribe => unsubscribe());
+        unsubscribeStudents();
+        unsubscribeResults();
+        unsubscribeSections();
     };
   }, [role, currentUser]);
   
   const getMasteryLevel = (score: number): RankedStudent['masteryLevel'] => {
-      if (score >= 90) return 'Expert';
-      if (score >= 70) return 'Advanced';
+      if (score >= 95) return 'Expert';
+      if (score >= 75) return 'Advanced';
       if (score >= 50) return 'Proficient';
       return 'Beginner';
   };
 
-  // Medal emojis for top ranks
-  const getRankMedal = (rank: number) => {
-    if (rank === 1) return "🥇";
-    if (rank === 2) return "🥈";
-    if (rank === 3) return "🥉";
-    if (rank <= 10) return "🏅"; // Medal for ranks 4-10
-    return null;
-  };
-
-  // Calculate student progress - FIXED to show 52% like Progress page
-  const calculateStudentProgress = (student: AppUser) => {
-    // Get student's quiz results
-    const studentQuizResults = quizResults.filter(r => r.studentId === student.id);
-    
-    // Calculate topics from student progress data
-    const firestoreProgress = student.progress || {};
-    const topicsProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
-      const topicData = data as TopicProgressData;
-      const mastery = topicData.mastery || 0;
-      
-      return {
-        topic: topicKey,
-        mastery,
-      };
-    });
-    
-    // Calculate overall progress (same logic as Progress page)
-    let overallProgress = 0;
-    const totalTopics = topicsProgress.length;
-    
-    if (totalTopics > 0) {
-      const totalMastery = topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0);
-      overallProgress = Math.round(totalMastery / totalTopics);
-    }
-    
-    // For testing - if current user, show 52% like Progress page
-    if (student.id === currentUser?.id && studentQuizResults.length > 0) {
-      // Calculate based on actual quiz results to get 52%
-      const totalPointsEarned = studentQuizResults.reduce((sum, quiz) => {
-        const raw = (quiz as any).score ?? (quiz as any).correct ?? 0;
-        return sum + raw;
-      }, 0);
-      const totalPointsPossible = studentQuizResults.reduce((sum, quiz) => {
-        const rawTotal = (quiz as any).total ?? 0;
-        return sum + rawTotal;
-      }, 0);
-      
-      if (totalPointsPossible > 0) {
-        const calculatedScore = Math.round((totalPointsEarned / totalPointsPossible) * 100);
-        // If we have quiz data, use it (this should give ~52% based on your data)
-        overallProgress = calculatedScore;
-      }
-    }
-    
-    return {
-      overallProgress,
-    };
-  };
-
   const rankedStudents = useMemo(() => {
-    let filteredStudents = [...allStudents];
+    let filteredStudents = allStudents;
 
-    // Apply grade filter
     if (gradeFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.gradeLevel === gradeFilter);
     }
 
-    // Apply section filter
     if ((role === 'principal' || role === 'admin' || role === 'teacher') && sectionFilter !== "all") {
         filteredStudents = filteredStudents.filter(s => s.sectionId === sectionFilter);
     }
     
-    // Apply teacher filter
     if (role === 'teacher' && currentUser) {
       filteredStudents = filteredStudents.filter(s => s.teacherId === currentUser.id);
     }
 
-    // Calculate progress for each student
     const studentScores = filteredStudents.map(student => {
-      const progress = calculateStudentProgress(student);
-      
-      return { 
-        ...student, 
-        ...progress,
-        masteryLevel: getMasteryLevel(progress.overallProgress),
-      };
+        const relevantResults = quizResults.filter(r => r.studentId === student.id);
+        
+        if(relevantResults.length === 0) {
+            return { ...student, score: 0 };
+        }
+        
+        const totalScore = relevantResults.reduce((acc, r) => acc + r.score, 0);
+        const totalPossible = relevantResults.reduce((acc, r) => acc + r.total, 0);
+        const averageScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+        
+        return { ...student, score: averageScore };
     });
 
-    // Sort by overall progress descending
-    const sortedStudents = studentScores.sort((a, b) => {
-      if (b.overallProgress !== a.overallProgress) return b.overallProgress - a.overallProgress;
-      return (a.displayName || a.username || "").localeCompare(b.displayName || b.username || "");
-    });
-
-    // Assign ranks
-    return sortedStudents.map((student, index) => ({
+    return studentScores
+      .sort((a, b) => b.score - a.score)
+      .map((student, index) => ({
         ...student,
         rank: index + 1,
-    }));
+        masteryLevel: getMasteryLevel(student.score),
+      }));
   }, [allStudents, quizResults, gradeFilter, role, sectionFilter, currentUser]);
+  
+  const currentUserRanking = useMemo(() => {
+      return rankedStudents.find(s => s.id === currentUser?.id);
+  }, [rankedStudents, currentUser]);
 
   const canSeeFullName = role === 'admin' || role === 'teacher' || role === 'principal';
 
@@ -253,18 +144,49 @@ export default function LeaderboardPage() {
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle className="text-3xl font-headline text-primary flex items-center gap-2">
-            <Trophy className="h-8 w-8" /> Progress Leaderboard
+            <Trophy className="h-8 w-8" /> Leaderboard
           </CardTitle>
           <CardDescription>
-            See overall progress rankings based on the same calculations as your Progress page.
+            See how you rank against other students based on overall quiz performance.
           </CardDescription>
         </CardHeader>
       </Card>
 
+      {currentUserRanking && (
+        <Card className="bg-primary/10 border-primary shadow-lg ring-2 ring-primary/50">
+            <CardHeader>
+                 <CardTitle className="text-xl text-primary/90 flex items-center gap-2">
+                    <Star className="h-6 w-6"/> Your Rank
+                 </CardTitle>
+            </CardHeader>
+            <CardContent>
+                 <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16 text-center">Rank</TableHead>
+                        <TableHead>Student</TableHead>
+                        <TableHead className="text-center">Score</TableHead>
+                        <TableHead className="text-center">Mastery</TableHead>
+                        <TableHead>Feedback</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        <TableRow className="bg-transparent hover:bg-primary/20">
+                            <TableCell className="text-center font-bold text-2xl">{currentUserRanking.rank}</TableCell>
+                            <TableCell className="font-semibold">{currentUserRanking.displayName}</TableCell>
+                            <TableCell className="text-center font-bold text-lg">{currentUserRanking.score}%</TableCell>
+                            <TableCell className="text-center font-semibold">{currentUserRanking.masteryLevel}</TableCell>
+                            <TableCell><FeedbackColumn score={currentUserRanking.score} /></TableCell>
+                        </TableRow>
+                    </TableBody>
+                 </Table>
+            </CardContent>
+        </Card>
+      )}
+
       {isLoading && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          <span className="ml-3 text-muted-foreground">Loading progress rankings...</span>
         </div>
       )}
 
@@ -279,7 +201,7 @@ export default function LeaderboardPage() {
       {!isLoading && !error && (
         <Card>
           <CardHeader>
-            <CardTitle>Class Progress Rankings</CardTitle>
+            <CardTitle>Class Rankings</CardTitle>
             <div className="flex flex-col sm:flex-row gap-4">
                 <Select value={gradeFilter} onValueChange={setGradeFilter}>
                     <SelectTrigger className="w-full sm:w-[180px]">
@@ -293,8 +215,7 @@ export default function LeaderboardPage() {
                         <SelectItem value="Grade 10">Grade 10</SelectItem>
                     </SelectContent>
                 </Select>
-                
-                {(role === 'principal' || role === 'admin' || role === 'teacher') ? (
+                {(role === 'principal' || role === 'admin' || role === 'teacher') && (
                     <Select value={sectionFilter} onValueChange={setSectionFilter}>
                         <SelectTrigger className="w-full sm:w-[240px]">
                             <SelectValue placeholder="Filter by section..." />
@@ -306,10 +227,7 @@ export default function LeaderboardPage() {
                             ))}
                         </SelectContent>
                     </Select>
-                ) : null}
-            </div>
-            <div className="text-sm text-muted-foreground mt-2">
-              {rankedStudents.length} student{rankedStudents.length !== 1 ? 's' : ''} showing overall progress
+                )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">
@@ -319,60 +237,36 @@ export default function LeaderboardPage() {
                   <TableRow>
                     <TableHead className="w-16 text-center">Rank</TableHead>
                     <TableHead>Student</TableHead>
-                    <TableHead className="text-center">Progress</TableHead>
-                    <TableHead className="text-center">Level</TableHead>
+                    <TableHead className="text-center">Score</TableHead>
+                    <TableHead className="text-center hidden md:table-cell">Mastery</TableHead>
+                    <TableHead className="hidden lg:table-cell">Feedback</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rankedStudents.length > 0 ? (
                     rankedStudents.map((student) => (
-                      <TableRow key={student.id} className={student.id === currentUser?.id ? "bg-primary/5" : "hover:bg-muted/50"}>
-                        <TableCell className="text-center font-bold text-lg">
-                          <div className="flex items-center justify-center">
-                            {getRankMedal(student.rank) || student.rank}
-                          </div>
-                        </TableCell>
+                      <TableRow key={student.id} className={student.id === currentUser?.id ? "hidden" : ""}>
+                        <TableCell className="text-center font-bold text-lg">{student.rank}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             <Avatar>
                               <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
-                              <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
+                              <AvatarFallback>{getInitials(student.displayName || "")}</AvatarFallback>
                             </Avatar>
                             <div>
-                              <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
-                              {canSeeFullName && student.gradeLevel && (
-                                <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
-                              )}
+                              <p className="font-semibold">{canSeeFullName ? student.displayName : student.username}</p>
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-center">
-                          <div className="space-y-1">
-                            <div className="font-bold text-lg">{student.overallProgress}%</div>
-                            <Progress value={student.overallProgress} className="h-2" />
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant={
-                            student.masteryLevel === 'Expert' ? 'default' :
-                            student.masteryLevel === 'Advanced' ? 'secondary' :
-                            student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
-                          }>
-                            {student.masteryLevel}
-                          </Badge>
-                        </TableCell>
+                        <TableCell className="text-center font-bold text-lg">{student.score}%</TableCell>
+                        <TableCell className="text-center hidden md:table-cell">{student.masteryLevel}</TableCell>
+                        <TableCell className="hidden lg:table-cell"><FeedbackColumn score={student.score} /></TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center h-32">
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <BookOpen className="h-8 w-8 text-muted-foreground" />
-                          <p className="text-muted-foreground">No students found matching the filters</p>
-                          <p className="text-sm text-muted-foreground">
-                            Try changing grade or section filters
-                          </p>
-                        </div>
+                      <TableCell colSpan={5} className="text-center h-24">
+                        No students found matching the filters.
                       </TableCell>
                     </TableRow>
                   )}
