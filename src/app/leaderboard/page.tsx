@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { AppUser, QuizResult } from "@/types";
+import type { AppUser } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
@@ -29,7 +29,6 @@ interface Section {
 export default function LeaderboardPage() {
   const { user: currentUser, role } = useAuth();
   const [allStudents, setAllStudents] = useState<AppUser[]>([]);
-  const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +42,6 @@ export default function LeaderboardPage() {
       collection(db, "users"),
       where("role", "==", "student")
     );
-    const resultsQuery = query(collection(db, "quizResults"));
     
     let sectionsQuery;
     if (role === 'teacher' && currentUser) {
@@ -54,37 +52,25 @@ export default function LeaderboardPage() {
 
     const unsubscribeStudents = onSnapshot(studentsQuery, (snapshot) => {
       setAllStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser)));
+      setIsLoading(false); // Set loading to false after students are fetched
     }, (err) => {
       console.error("Error fetching students:", err);
       setError("Failed to load student data.");
-    });
-    
-    const unsubscribeResults = onSnapshot(resultsQuery, (snapshot) => {
-        setQuizResults(snapshot.docs.map(doc => doc.data() as QuizResult));
-        if (role !== 'principal' && role !== 'admin' && role !== 'teacher') setIsLoading(false);
-    }, (err) => {
-        console.error("Error fetching quiz results:", err);
-        setError("Failed to load quiz results data.");
-        setIsLoading(false);
+      setIsLoading(false);
     });
     
     let unsubscribeSections = () => {};
     if (sectionsQuery) {
         unsubscribeSections = onSnapshot(sectionsQuery, (snapshot) => {
             setSections(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })));
-            setIsLoading(false);
         }, (err) => {
             console.error("Error fetching sections:", err);
             setError("Failed to load sections data.");
-            setIsLoading(false);
         });
-    } else {
-      setIsLoading(false);
     }
 
     return () => {
         unsubscribeStudents();
-        unsubscribeResults();
         unsubscribeSections();
     };
   }, [role, currentUser]);
@@ -112,23 +98,11 @@ export default function LeaderboardPage() {
     }
 
     const studentScores = filteredStudents.map(student => {
-        const studentResults = quizResults.filter(r => r.studentId === student.id);
-        const topicMastery: { [key: string]: number } = {};
+        const studentProgress = student.progress || {};
+        const totalMastery = Object.values(studentProgress).reduce((acc, topic: any) => acc + (topic.mastery || 0), 0);
+        const totalTopics = mathTopics.length;
+        const overallProgress = totalTopics > 0 ? Math.round(totalMastery / totalTopics) : 0;
 
-        mathTopics.forEach(topic => {
-          const topicResults = studentResults.filter(r => r.topic === topic.slug);
-          if (topicResults.length > 0) {
-            const totalScore = topicResults.reduce((acc, r) => acc + r.score, 0);
-            const totalPossible = topicResults.reduce((acc, r) => acc + r.total, 0);
-            topicMastery[topic.slug] = totalPossible > 0 ? (totalScore / totalPossible) * 100 : 0;
-          } else {
-            topicMastery[topic.slug] = 0;
-          }
-        });
-
-        const totalMastery = Object.values(topicMastery).reduce((acc, val) => acc + val, 0);
-        const overallProgress = mathTopics.length > 0 ? Math.round(totalMastery / mathTopics.length) : 0;
-        
         return { ...student, overallProgress };
     });
 
@@ -139,7 +113,7 @@ export default function LeaderboardPage() {
         rank: index + 1,
         masteryLevel: getMasteryLevel(student.overallProgress),
       }));
-  }, [allStudents, quizResults, gradeFilter, role, sectionFilter, currentUser]);
+  }, [allStudents, gradeFilter, role, sectionFilter, currentUser]);
   
   const currentUserRanking = useMemo(() => {
       return rankedStudents.find(s => s.id === currentUser?.id);
@@ -230,7 +204,7 @@ export default function LeaderboardPage() {
                     <Select value={sectionFilter} onValueChange={setSectionFilter}>
                         <SelectTrigger className="w-full sm:w-[240px]">
                             <SelectValue placeholder="Filter by section..." />
-                        </SelectTrigger>
+                        </Trigger>
                         <SelectContent>
                             <SelectItem value="all">All Sections</SelectItem>
                             {sections.map(section => (
