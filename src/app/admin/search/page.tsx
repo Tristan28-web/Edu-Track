@@ -74,45 +74,14 @@ export default function PrincipalSearchPage() {
             totalAttempts: totalAttempts,
             averageScore: averageScore,
           };
-        } else {
-          // Get resource download count from resourceDownloads collection if it exists
-          let downloadCount = 0;
-          try {
-            const resourceStatsQuery = query(
-              collection(db, "resourceDownloads"),
-              where("resourceId", "==", item.id)
-            );
-            const resourceStatsSnapshot = await getDocs(resourceStatsQuery);
-            downloadCount = resourceStatsSnapshot.docs.length;
-          } catch (err) {
-            // If collection doesn't exist, check student progress for resource access
-            const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
-            const studentsSnapshot = await getDocs(studentsQuery);
-            
-            for (const studentDoc of studentsSnapshot.docs) {
-              const studentData = studentDoc.data() as AppUser;
-              const studentProgress = studentData.progress as Record<string, any> | undefined;
-              
-              // Check if student has any activity that might indicate resource access
-              if (studentProgress && item.topic) {
-                const topicProgress = studentProgress[item.topic];
-                if (topicProgress && topicProgress.lastActivity) {
-                  downloadCount++;
-                }
-              }
-            }
-          }
-          
-          stats[item.id] = {
-            totalDownloads: downloadCount,
-          };
         }
+        // REMOVED: No longer fetching download stats for resources
       }
       
       setContentStats(stats);
     } catch (err) {
       console.error("Error fetching content stats:", err);
-      // Fallback to zero values if stats collection doesn't exist
+      // Only set quiz stats, not resource stats
       const fallbackStats: Record<string, ContentStats> = {};
       content.forEach(item => {
         if (item.contentType === 'quiz') {
@@ -120,11 +89,8 @@ export default function PrincipalSearchPage() {
             totalAttempts: 0,
             averageScore: 0,
           };
-        } else {
-          fallbackStats[item.id] = {
-            totalDownloads: 0,
-          };
         }
+        // No stats for resources
       });
       setContentStats(fallbackStats);
     }
@@ -399,34 +365,21 @@ export default function PrincipalSearchPage() {
                         </span>
                       </div>
 
-                      {contentStats[item.id] && (
+                      {/* Only show stats for quizzes, not for resources */}
+                      {item.contentType === 'quiz' && contentStats[item.id] && (
                         <div className="flex flex-wrap gap-4 mt-2">
-                          {item.contentType === 'quiz' ? (
-                            <>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sm font-medium">Attempts:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.totalAttempts || 0}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sm font-medium">Avg Score:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.averageScore || 0}%
-                                </span>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="flex items-center gap-1">
-                                <Download className="h-3 w-3" />
-                                <span className="text-sm font-medium">Downloads:</span>
-                                <span className="text-sm text-muted-foreground">
-                                  {contentStats[item.id]?.totalDownloads || 0}
-                                </span>
-                              </div>
-                            </>
-                          )}
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-medium">Attempts:</span>
+                            <span className="text-sm text-muted-foreground">
+                              {contentStats[item.id]?.totalAttempts || 0}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-medium">Avg Score:</span>
+                            <span className="text-sm text-muted-foreground">
+                              {contentStats[item.id]?.averageScore || 0}%
+                            </span>
+                          </div>
                         </div>
                       )}
 
