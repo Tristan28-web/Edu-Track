@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,8 +14,6 @@ import { getInitials } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-
-const UNLOCK_MASTERY_THRESHOLD = 75;
 
 interface TopicProgressData {
   mastery: number;
@@ -61,6 +59,11 @@ export default function ProgressLeaderboardPage() {
         ...doc.data() 
       } as AppUser));
       
+      console.log("Loaded students with progress:", students.map(s => ({
+        name: s.displayName,
+        progress: s.progress
+      })));
+      
       setAllStudents(students);
       setIsLoading(false);
     }, (err) => {
@@ -76,20 +79,19 @@ export default function ProgressLeaderboardPage() {
     };
   }, [currentUser]);
 
-  // Calculate overall progress for each student - EXACT SAME as My Progress page
+  // Calculate overall progress for each student - USING EXACT SAME STORED MASTERY VALUES
   const calculateStudentProgress = (student: AppUser) => {
     const firestoreProgress = student.progress || {};
     
-    // Convert progress data to array format (EXACT SAME as My Progress page)
+    // Get topics and mastery values - EXACT SAME AS MY PROGRESS PAGE
     const topicsProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
       const topicData = data as TopicProgressData;
-      const quizzesAttempted = topicData.quizzesAttempted || 0;
-      const mastery = topicData.mastery || 0;
+      // USE THE STORED mastery VALUE - SAME AS MY PROGRESS PAGE
+      const storedMastery = topicData.mastery || 0;
       
       return {
         topic: topicKey, 
-        mastery,
-        quizzesAttempted,
+        mastery: storedMastery, // Use stored value, don't recalculate
       };
     });
 
@@ -98,11 +100,18 @@ export default function ProgressLeaderboardPage() {
     const totalTopics = topicsProgress.length;
     
     if (totalTopics > 0) {
-      overallCompletion = Math.round(
-        topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0) /
-          totalTopics
-      );
+      // Sum all stored mastery values and divide by number of topics
+      // This should give: (60 + 43) / 2 = 103 / 2 = 51.5 ≈ 52%
+      const totalMastery = topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0);
+      overallCompletion = Math.round(totalMastery / totalTopics);
     }
+    
+    console.log(`${student.displayName || student.username} progress:`, {
+      topics: topicsProgress.map(t => `${t.topic}: ${t.mastery}%`),
+      totalTopics,
+      totalMastery: topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0),
+      overallCompletion
+    });
     
     return overallCompletion;
   };
@@ -133,7 +142,7 @@ export default function ProgressLeaderboardPage() {
       filteredStudents = filteredStudents.filter(s => s.gradeLevel === gradeFilter);
     }
 
-    // Calculate progress for each student and add rank
+    // Calculate progress for each student USING STORED MASTERY VALUES
     const studentsWithProgress = filteredStudents.map(student => {
       const overallProgress = calculateStudentProgress(student);
       
@@ -172,6 +181,9 @@ export default function ProgressLeaderboardPage() {
     return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
   }
 
+  // Find current user's ranking for debugging
+  const currentUserRank = rankedStudents.find(s => s.id === currentUser?.id);
+
   return (
     <div className="space-y-8">
       <Card className="shadow-lg">
@@ -181,6 +193,13 @@ export default function ProgressLeaderboardPage() {
           </CardTitle>
           <CardDescription>
             Rankings based on the exact same overall progress calculation as My Progress page.
+            {currentUserRank && (
+              <span className="block text-sm text-muted-foreground mt-1">
+                Your stored mastery: {Object.entries(currentUserRank.progress || {}).map(([key, data]) => 
+                  `${key}: ${(data as TopicProgressData).mastery}%`
+                ).join(", ")} → {currentUserRank.overallProgress}% overall
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
       </Card>
