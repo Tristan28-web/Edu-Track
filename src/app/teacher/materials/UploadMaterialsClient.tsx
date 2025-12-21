@@ -45,7 +45,6 @@ export function UploadMaterialsClient() {
   const [showArchived, setShowArchived] = useState(false);
   
   const [topicInput, setTopicInput] = useState<string>("");
-  const [recentTopics, setRecentTopics] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -76,14 +75,6 @@ export function UploadMaterialsClient() {
       const files = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CourseContentItem));
       setUploadedFiles(files);
       setIsLoadingFiles(false);
-      
-      // Extract recent unique topics from uploaded files
-      const topics = Array.from(new Set(
-        files
-          .map(file => file.topic)
-          .filter((topic): topic is string => !!topic)
-      )).slice(0, 5); // Show only 5 most recent topics
-      setRecentTopics(topics);
     }, (err) => {
       console.error("Error fetching resources:", err);
       setError("Could not fetch the list of uploaded resources. You may need to create a Firestore index.");
@@ -243,11 +234,6 @@ export function UploadMaterialsClient() {
     return <File className="h-5 w-5 text-muted-foreground" />;
   };
 
-  // Quick select recent topic
-  const selectRecentTopic = (topic: string) => {
-    setTopicInput(topic);
-  };
-
   return (
     <div className="space-y-8">
       <Card>
@@ -272,23 +258,6 @@ export function UploadMaterialsClient() {
                   onChange={(e) => setTopicInput(e.target.value)}
                   disabled={isUploading}
                 />
-                
-                {recentTopics.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <p className="text-xs text-muted-foreground w-full">Recent topics:</p>
-                    {recentTopics.map((topic, index) => (
-                      <Badge 
-                        key={index}
-                        variant="outline" 
-                        className="cursor-pointer hover:bg-primary/10 transition-colors"
-                        onClick={() => selectRecentTopic(topic)}
-                      >
-                        <Tag className="h-3 w-3 mr-1" />
-                        {topic}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
              <div>
