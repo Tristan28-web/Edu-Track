@@ -1,31 +1,52 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '@/contexts/AuthContext';
-import { db } from '@/lib/firebase';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, AlertTriangle, Trophy, BookOpen } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import React, { useEffect, useState, useMemo } from "react";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { useAuth } from "@/contexts/AuthContext";
+import { db } from "@/lib/firebase";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Loader2,
+  Trophy,
+  BookOpen,
+} from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import type { AppUser } from '@/types';
-import { getInitials } from '@/lib/utils';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { AppUser } from "@/types";
+import { getInitials } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 interface TopicProgressData {
   mastery: number;
-  status: string;
   quizzesAttempted: number;
-  [key: string]: any;
 }
 
 interface RankedStudent extends AppUser {
   rank: number;
   overallProgress: number;
-  masteryLevel: 'Beginner' | 'Proficient' | 'Advanced' | 'Expert';
+  masteryLevel: "Beginner" | "Proficient" | "Advanced" | "Expert";
 }
 
 export default function ProgressLeaderboardPage() {
@@ -36,116 +57,75 @@ export default function ProgressLeaderboardPage() {
   const [gradeFilter, setGradeFilter] = useState<string>("all");
 
   useEffect(() => {
-    setIsLoading(true);
-    
     if (!currentUser) {
       setIsLoading(false);
       return;
     }
 
-    let isMounted = true;
-
-    // Query all students
     const studentsQuery = query(
       collection(db, "users"),
       where("role", "==", "student")
     );
 
-    const unsubscribeStudents = onSnapshot(studentsQuery, (snapshot) => {
-      if (!isMounted) return;
-      
-      const students = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      } as AppUser));
-      
-      console.log("Loaded students with progress:", students.map(s => ({
-        name: s.displayName,
-        progress: s.progress
-      })));
-      
-      setAllStudents(students);
-      setIsLoading(false);
-    }, (err) => {
-      if (!isMounted) return;
-      console.error("Error fetching students:", err);
-      setError(`Failed to load student data: ${err.message}`);
-      setIsLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      studentsQuery,
+      (snapshot) => {
+        const students = snapshot.docs.map(
+          (doc) =>
+            ({
+              id: doc.id,
+              ...doc.data(),
+            } as AppUser)
+        );
 
-    return () => {
-      isMounted = false;
-      unsubscribeStudents();
-    };
+        setAllStudents(students);
+        setIsLoading(false);
+      },
+      (err) => {
+        setError(err.message);
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
   }, [currentUser]);
 
-  // Calculate overall progress for each student - USING EXACT SAME STORED MASTERY VALUES
-  const calculateStudentProgress = (student: AppUser) => {
-    const firestoreProgress = student.progress || {};
-    
-    // Get topics and mastery values - EXACT SAME AS MY PROGRESS PAGE
-    const topicsProgress = Object.entries(firestoreProgress).map(([topicKey, data]) => {
-      const topicData = data as TopicProgressData;
-      // USE THE STORED mastery VALUE - SAME AS MY PROGRESS PAGE
-      const storedMastery = topicData.mastery || 0;
-      
-      return {
-        topic: topicKey, 
-        mastery: storedMastery, // Use stored value, don't recalculate
-      };
-    });
+  // 🔥 MATCHES MY PROGRESS PAGE 1:1
+  const calculateStudentProgress = (student: AppUser): number => {
+    const progress = student.progress || {};
 
-    // CALCULATE OVERALL COMPLETION - EXACT SAME FORMULA AS MY PROGRESS PAGE
-    let overallCompletion = 0;
-    const totalTopics = topicsProgress.length;
-    
-    if (totalTopics > 0) {
-      // Sum all stored mastery values and divide by number of topics
-      // This should give: (60 + 43) / 2 = 103 / 2 = 51.5 ≈ 52%
-      const totalMastery = topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0);
-      overallCompletion = Math.round(totalMastery / totalTopics);
-    }
-    
-    console.log(`${student.displayName || student.username} progress:`, {
-      topics: topicsProgress.map(t => `${t.topic}: ${t.mastery}%`),
-      totalTopics,
-      totalMastery: topicsProgress.reduce((sum, topic) => sum + topic.mastery, 0),
-      overallCompletion
-    });
-    
-    return overallCompletion;
+    const attemptedTopics = Object.values(progress)
+      .map((data) => data as TopicProgressData)
+      .filter((topic) => topic.quizzesAttempted > 0);
+
+    if (attemptedTopics.length === 0) return 0;
+
+    const totalMastery = attemptedTopics.reduce(
+      (sum, topic) => sum + (Number(topic.mastery) || 0),
+      0
+    );
+
+    return Math.round(totalMastery / attemptedTopics.length);
   };
 
-  // Get mastery level based on overall progress
-  const getMasteryLevel = (score: number): RankedStudent['masteryLevel'] => {
-    if (score >= 90) return 'Expert';
-    if (score >= 70) return 'Advanced';
-    if (score >= 50) return 'Proficient';
-    return 'Beginner';
+  const getMasteryLevel = (score: number): RankedStudent["masteryLevel"] => {
+    if (score >= 90) return "Expert";
+    if (score >= 70) return "Advanced";
+    if (score >= 50) return "Proficient";
+    return "Beginner";
   };
 
-  // Medal emojis for top ranks
-  const getRankMedal = (rank: number) => {
-    if (rank === 1) return "🥇";
-    if (rank === 2) return "🥈";
-    if (rank === 3) return "🥉";
-    if (rank <= 10) return "🏅";
-    return null;
-  };
-
-  // Calculate ranked students
   const rankedStudents = useMemo(() => {
-    let filteredStudents = [...allStudents];
+    let students = [...allStudents];
 
-    // Apply grade filter
     if (gradeFilter !== "all") {
-      filteredStudents = filteredStudents.filter(s => s.gradeLevel === gradeFilter);
+      students = students.filter(
+        (s) => s.gradeLevel === gradeFilter
+      );
     }
 
-    // Calculate progress for each student USING STORED MASTERY VALUES
-    const studentsWithProgress = filteredStudents.map(student => {
+    const withProgress = students.map((student) => {
       const overallProgress = calculateStudentProgress(student);
-      
       return {
         ...student,
         overallProgress,
@@ -153,145 +133,139 @@ export default function ProgressLeaderboardPage() {
       };
     });
 
-    // Sort by overall progress descending
-    const sortedStudents = studentsWithProgress.sort((a, b) => {
-      if (b.overallProgress !== a.overallProgress) return b.overallProgress - a.overallProgress;
-      return (a.displayName || a.username || "").localeCompare(b.displayName || b.username || "");
-    });
-
-    // Assign ranks
-    return sortedStudents.map((student, index) => ({
-      ...student,
-      rank: index + 1,
-    }));
+    return withProgress
+      .sort((a, b) => b.overallProgress - a.overallProgress)
+      .map((student, index) => ({
+        ...student,
+        rank: index + 1,
+      }));
   }, [allStudents, gradeFilter]);
 
-  const canSeeFullName = role === 'admin' || role === 'teacher' || role === 'principal';
+  const canSeeFullName =
+    role === "admin" || role === "teacher" || role === "principal";
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center min-h-[calc(100vh-200px)]">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg text-muted-foreground">Loading leaderboard...</p>
+      <div className="flex justify-center items-center min-h-[300px]">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
       </div>
     );
   }
 
   if (error) {
-    return <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>;
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>Error</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
   }
-
-  // Find current user's ranking for debugging
-  const currentUserRank = rankedStudents.find(s => s.id === currentUser?.id);
 
   return (
     <div className="space-y-8">
-      <Card className="shadow-lg">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-3xl font-headline text-primary flex items-center gap-2">
-            <Trophy className="h-8 w-8" /> Progress Leaderboard
+          <CardTitle className="text-3xl flex items-center gap-2">
+            <Trophy className="h-8 w-8" />
+            Progress Leaderboard
           </CardTitle>
           <CardDescription>
-            Rankings based on the exact same overall progress calculation as My Progress page.
-            {currentUserRank && (
-              <span className="block text-sm text-muted-foreground mt-1">
-                Your stored mastery: {Object.entries(currentUserRank.progress || {}).map(([key, data]) => 
-                  `${key}: ${(data as TopicProgressData).mastery}%`
-                ).join(", ")} → {currentUserRank.overallProgress}% overall
-              </span>
-            )}
+            Rankings based on overall quiz mastery progress.
           </CardDescription>
         </CardHeader>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Class Progress Rankings</CardTitle>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Select value={gradeFilter} onValueChange={setGradeFilter}>
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="Grade 7" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Grade Levels</SelectItem>
-                <SelectItem value="Grade 7">Grade 7</SelectItem>
-                <SelectItem value="Grade 8">Grade 8</SelectItem>
-                <SelectItem value="Grade 9">Grade 9</SelectItem>
-                <SelectItem value="Grade 10">Grade 10</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="text-sm text-muted-foreground mt-2">
-            {rankedStudents.length} student{rankedStudents.length !== 1 ? 's' : ''} showing overall progress
-          </div>
+          <CardTitle>Class Rankings</CardTitle>
+
+          <Select value={gradeFilter} onValueChange={setGradeFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select Grade" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Grades</SelectItem>
+              <SelectItem value="Grade 7">Grade 7</SelectItem>
+              <SelectItem value="Grade 8">Grade 8</SelectItem>
+              <SelectItem value="Grade 9">Grade 9</SelectItem>
+              <SelectItem value="Grade 10">Grade 10</SelectItem>
+            </SelectContent>
+          </Select>
         </CardHeader>
-        <CardContent className="pt-0">
-          <div className="w-full overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16 text-center">Rank</TableHead>
-                  <TableHead>Student</TableHead>
-                  <TableHead className="text-center">Progress</TableHead>
-                  <TableHead className="text-center">Level</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rankedStudents.length > 0 ? (
-                  rankedStudents.map((student) => (
-                    <TableRow key={student.id} className={student.id === currentUser?.id ? "bg-primary/5" : "hover:bg-muted/50"}>
-                      <TableCell className="text-center font-bold text-lg">
-                        <div className="flex items-center justify-center">
-                          {getRankMedal(student.rank) || student.rank}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar>
-                            <AvatarImage src={student.avatarUrl || undefined} alt={student.displayName || "Student"} />
-                            <AvatarFallback>{getInitials(student.displayName || student.username || "")}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-semibold">{canSeeFullName ? (student.displayName || student.username) : student.username}</p>
-                            {canSeeFullName && student.gradeLevel && (
-                              <p className="text-xs text-muted-foreground">{student.gradeLevel}</p>
+
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-center">Rank</TableHead>
+                <TableHead>Student</TableHead>
+                <TableHead className="text-center">Progress</TableHead>
+                <TableHead className="text-center">Level</TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              {rankedStudents.length > 0 ? (
+                rankedStudents.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell className="text-center font-bold">
+                      {student.rank}
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar>
+                          <AvatarImage src={student.avatarUrl} />
+                          <AvatarFallback>
+                            {getInitials(
+                              student.displayName ||
+                                student.username ||
+                                ""
                             )}
-                          </div>
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold">
+                            {canSeeFullName
+                              ? student.displayName || student.username
+                              : student.username}
+                          </p>
+                          {canSeeFullName && (
+                            <p className="text-xs text-muted-foreground">
+                              {student.gradeLevel}
+                            </p>
+                          )}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="space-y-1">
-                          <div className="font-bold text-lg">{student.overallProgress}%</div>
-                          <Progress value={student.overallProgress} className="h-2" />
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={
-                          student.masteryLevel === 'Expert' ? 'default' :
-                          student.masteryLevel === 'Advanced' ? 'secondary' :
-                          student.masteryLevel === 'Proficient' ? 'outline' : 'secondary'
-                        }>
-                          {student.masteryLevel}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center h-32">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <BookOpen className="h-8 w-8 text-muted-foreground" />
-                        <p className="text-muted-foreground">No students found matching the filters</p>
-                        <p className="text-sm text-muted-foreground">
-                          Try changing the grade level filter
-                        </p>
                       </div>
                     </TableCell>
+
+                    <TableCell className="text-center">
+                      <div className="space-y-1">
+                        <p className="font-bold">
+                          {student.overallProgress}%
+                        </p>
+                        <Progress
+                          value={student.overallProgress}
+                          className="h-2"
+                        />
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-center">
+                      <Badge>{student.masteryLevel}</Badge>
+                    </TableCell>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center h-32">
+                    <BookOpen className="mx-auto mb-2 text-muted-foreground" />
+                    No students found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>
