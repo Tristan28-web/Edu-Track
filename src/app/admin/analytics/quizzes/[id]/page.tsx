@@ -6,7 +6,7 @@ import { doc, getDoc, collection, getDocs, query, where } from "firebase/firesto
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Loader2, AlertTriangle, FileText, Users, TrendingUp, Target, CheckCircle, XCircle } from "lucide-react";
+import { Loader2, AlertTriangle, FileText, Users, TrendingUp, Target, CheckCircle, XCircle, Calendar } from "lucide-react";
 import type { CourseContentItem, AppUser, QuizResult } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -384,7 +384,7 @@ export default function QuizAnalyticsPage() {
                     <div>
                       <p className="font-medium">Attempt #{index + 1}</p>
                       <div className="text-sm text-muted-foreground space-y-1">
-                        <p>Score: <span className="font-semibold">{result.percentage || 0}%</span></p>
+                        <p>Score: <span className="font-semibold">{Math.round(result.percentage || 0)}%</span></p>
                         <p>Correct: {result.correct || 0}/{result.total || 0}</p>
                         {result.submittedAt && (
                           <p className="text-xs">
