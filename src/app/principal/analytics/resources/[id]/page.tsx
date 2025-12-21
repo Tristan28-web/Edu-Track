@@ -54,19 +54,47 @@ export default function ResourceAnalyticsPage() {
           }
         }
         
-        const downloadsQuery = query(collection(db, "resourceDownloads"), where("resourceId", "==", id));
-        const downloadsSnapshot = await getDocs(downloadsQuery);
-        const totalDownloads = downloadsSnapshot.size;
-
+        // Try to get downloads from resourceDownloads collection
+        let totalDownloads = 0;
         const downloadDetails: DownloadDetail[] = [];
-        for (const downloadDoc of downloadsSnapshot.docs) {
-          const downloadData = downloadDoc.data() as ResourceDownload;
-          const studentDoc = await getDoc(doc(db, "users", downloadData.studentId));
-          if (studentDoc.exists()) {
-            downloadDetails.push({
-              student: studentDoc.data() as AppUser,
-              downloadedAt: downloadData.downloadedAt.toDate(),
-            });
+        
+        try {
+          const downloadsQuery = query(collection(db, "resourceDownloads"), where("resourceId", "==", id));
+          const downloadsSnapshot = await getDocs(downloadsQuery);
+          totalDownloads = downloadsSnapshot.size;
+
+          for (const downloadDoc of downloadsSnapshot.docs) {
+            const downloadData = downloadDoc.data() as ResourceDownload;
+            const studentDoc = await getDoc(doc(db, "users", downloadData.studentId));
+            if (studentDoc.exists()) {
+              downloadDetails.push({
+                student: studentDoc.data() as AppUser,
+                downloadedAt: downloadData.downloadedAt.toDate(),
+              });
+            }
+          }
+        } catch (err) {
+          // If resourceDownloads collection doesn't exist, check student progress for resource access
+          console.log("resourceDownloads collection not found, checking student progress...");
+          
+          const studentsQuery = query(collection(db, "users"), where("role", "==", "student"));
+          const studentsSnapshot = await getDocs(studentsQuery);
+          
+          for (const studentDoc of studentsSnapshot.docs) {
+            const studentData = { id: studentDoc.id, ...studentDoc.data() } as AppUser;
+            const studentProgress = studentData.progress as Record<string, any> | undefined;
+            
+            // Check if student has accessed this resource topic
+            if (studentProgress && resourceData.topic) {
+              const topicProgress = studentProgress[resourceData.topic];
+              if (topicProgress && topicProgress.lastActivity) {
+                totalDownloads++;
+                downloadDetails.push({
+                  student: studentData,
+                  downloadedAt: topicProgress.lastActivity.toDate(),
+                });
+              }
+            }
           }
         }
 
