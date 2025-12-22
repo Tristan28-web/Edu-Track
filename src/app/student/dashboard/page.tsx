@@ -252,7 +252,6 @@ export default function StudentDashboardPage() {
   };
   
   const totalQuestions = (selectedQuiz?.content as QuizDetails)?.questions.length ?? 0;
-  const timeLimit = (selectedQuiz?.content as QuizDetails)?.timeLimitMinutes;
   
   return (
     <div className="space-y-8">
@@ -356,11 +355,25 @@ export default function StudentDashboardPage() {
                 <DialogTitle>{selectedQuiz.title}</DialogTitle>
                 <DialogDescription>
                   {selectedQuiz.description}
-                  {timeLimit && timeLimit > 0 && (
-                    <span className="block text-sm text-muted-foreground mt-2">
-                      Time Limit: {timeLimit} minutes
-                    </span>
-                  )}
+                  
+                  {/* Time limit display with friendly messages */}
+                  {(() => {
+                    const timeLimit = (selectedQuiz.content as QuizDetails)?.timeLimitMinutes;
+                    
+                    if (timeLimit && timeLimit > 0) {
+                      return (
+                        <span className="block text-sm text-muted-foreground mt-2">
+                          ⏱️ Time Limit: {timeLimit} minutes
+                        </span>
+                      );
+                    }
+                    
+                    return (
+                      <span className="block text-sm text-muted-foreground mt-2">
+                        🕒 No Time Limit - Take your time!
+                      </span>
+                    );
+                  })()}
                 </DialogDescription>
               </DialogHeader>
               
