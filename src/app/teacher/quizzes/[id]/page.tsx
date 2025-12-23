@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -68,15 +67,33 @@ export default function QuizSubmissionsPage() {
           }
 
           const studentResults: StudentQuizResult[] = [];
+          
           studentsSnapshot.forEach(studentDoc => {
+            const studentId = studentDoc.id;
             const studentData = studentDoc.data() as AppUser;
             const progressData = studentData.progress?.[fetchedQuiz.topic] as UserProgressTopic | undefined;
-
+            
+            // Get the score (already rounded in the database)
+            const rawScore = progressData?.lastQuizScore;
+            const score = rawScore !== undefined && rawScore !== null ? Math.round(rawScore) : null;
+            
+            // Determine status based on score and quiz completion
+            let status: 'Completed' | 'In Progress' | 'Not Started' | 'Content Viewed' = 'Not Started';
+            
+            if (score !== null) {
+              // Student has a score, so quiz is completed
+              status = 'Completed';
+            } else if (progressData?.status === 'Completed' || progressData?.status === 'In Progress' || progressData?.status === 'Content Viewed') {
+              // Use the topic status if no score but topic has progress
+              status = progressData.status;
+            }
+            // Otherwise, status remains 'Not Started'
+            
             studentResults.push({
-              studentId: studentDoc.id,
+              studentId: studentId,
               studentName: studentData.displayName || "Unnamed Student",
-              score: progressData?.lastQuizScore ?? null,
-              status: progressData?.status || 'Not Started',
+              score: score,
+              status: status,
             });
           });
           
@@ -100,16 +117,20 @@ export default function QuizSubmissionsPage() {
     return () => unsubscribe();
   }, [contentId, teacher, authLoading]);
 
-  const averageScore = results.length > 0 ? Math.round(
-    results
-        .map(r => r.score || 0)
-        .reduce((acc, score) => acc + score, 0) / results.filter(r => r.score !== null).length
-  ) : 0;
+  // Calculate average score - FIXED: Avoid NaN and properly handle rounding
+  const completedResults = results.filter(r => r.score !== null);
+  const averageScore = completedResults.length > 0 ? 
+    Math.round(
+      completedResults.reduce((acc, r) => acc + (r.score || 0), 0) / 
+      completedResults.length
+    ) : 0;
   
-  const completionRate = results.length > 0 ? Math.round(
-    (results.filter(r => r.status === 'Completed').length / results.length) * 100
-  ) : 0;
+  const completionRate = results.length > 0 ? 
+    Math.round(
+      (results.filter(r => r.status === 'Completed').length / results.length) * 100
+    ) : 0;
 
+  // Rest of your component remains the same...
   if (isLoading) {
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-200px)]">
@@ -145,8 +166,15 @@ export default function QuizSubmissionsPage() {
                 <CardTitle className="text-sm font-medium">Class Average Score</CardTitle>
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold">{isNaN(averageScore) ? 'N/A' : <><AnimatedCounter value={averageScore} />%</>}</div>
-                 <p className="text-xs text-muted-foreground">Based on completed quizzes</p>
+                <div className="text-2xl font-bold">
+                  {completedResults.length > 0 ? 
+                    <><AnimatedCounter value={averageScore} />%</> : 
+                    'N/A'
+                  }
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Based on {completedResults.length} completed quizzes
+                </p>
             </CardContent>
         </Card>
         <Card>
@@ -155,11 +183,12 @@ export default function QuizSubmissionsPage() {
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold"><AnimatedCounter value={completionRate} />%</div>
-                <p className="text-xs text-muted-foreground">{results.filter(r => r.status === 'Completed').length} out of {results.length} students completed</p>
+                <p className="text-xs text-muted-foreground">
+                  {results.filter(r => r.status === 'Completed').length} out of {results.length} students completed
+                </p>
             </CardContent>
         </Card>
       </div>
-
 
       <Card>
         <CardHeader>
@@ -180,7 +209,16 @@ export default function QuizSubmissionsPage() {
                   results.map(result => (
                     <TableRow key={result.studentId}>
                       <TableCell className="font-medium">{result.studentName}</TableCell>
-                      <TableCell>{result.status}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          result.status === 'Completed' ? 'bg-green-100 text-green-800' :
+                          result.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
+                          result.status === 'Content Viewed' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {result.status}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right">
                           {result.score !== null ? `${result.score}%` : 'N/A'}
                       </TableCell>
